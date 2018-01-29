@@ -1087,13 +1087,6 @@ static long do_fb_ioctl(struct fb_info *info, unsigned int cmd,
 	void __user *argp = (void __user *)arg;
 	long ret = 0;
 
-	memset(&var, 0, sizeof(var));
-	memset(&fix, 0, sizeof(fix));
-	memset(&con2fb, 0, sizeof(con2fb));
-	memset(&cmap_from, 0, sizeof(cmap_from));
-	memset(&cmap, 0, sizeof(cmap));
-	memset(&event, 0, sizeof(event));
-
 	switch (cmd) {
 	case FBIOGET_VSCREENINFO:
 		if (!lock_fb_info(info))
@@ -1195,14 +1188,17 @@ static long do_fb_ioctl(struct fb_info *info, unsigned int cmd,
 		unlock_fb_info(info);
 		break;
 	case FBIOBLANK:
+	//ASUS_BSP: Louis +++
+        printk("[Display] FBIOBLANK(%d)+++\n", (int) arg);
 		if (!lock_fb_info(info))
 			return -ENODEV;
-		console_lock();
+		//console_lock();
 		info->flags |= FBINFO_MISC_USEREVENT;
 		ret = fb_blank(info, arg);
 		info->flags &= ~FBINFO_MISC_USEREVENT;
-		console_unlock();
+		//console_unlock();
 		unlock_fb_info(info);
+        printk("[Display] FBIOBLANK(%d)---\n", (int) arg);
 		break;
 	default:
 		fb = info->fbops;

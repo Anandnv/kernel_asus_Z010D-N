@@ -279,41 +279,6 @@ found:
 	return s;
 }
 
-static inline struct sock *unix_find_socket_byname(struct net *net,
-						   struct sockaddr_un *sunname,
-						   int len, int type,
-						   unsigned int hash)
-{
-	struct sock *s;
-
-	spin_lock(&unix_table_lock);
-	s = __unix_find_socket_byname(net, sunname, len, type, hash);
-	if (s)
-		sock_hold(s);
-	spin_unlock(&unix_table_lock);
-	return s;
-}
-
-static struct sock *unix_find_socket_byinode(struct inode *i)
-{
-	struct sock *s;
-
-	spin_lock(&unix_table_lock);
-	sk_for_each(s,
-		    &unix_socket_table[i->i_ino & (UNIX_HASH_SIZE - 1)]) {
-		struct dentry *dentry = unix_sk(s)->path.dentry;
-
-		if (dentry && dentry->d_inode == i) {
-			sock_hold(s);
-			goto found;
-		}
-	}
-	s = NULL;
-found:
-	spin_unlock(&unix_table_lock);
-	return s;
-}
-
 /* Support code for asymmetrically connected dgram sockets
  *
  * If a datagram socket is connected to a socket not itself connected
@@ -389,7 +354,7 @@ static void unix_dgram_peer_wake_disconnect(struct sock *sk,
 	u_other = unix_sk(other);
 	spin_lock(&u_other->peer_wait.lock);
 
-	if (u->peer_wake.private == other) {
+    if (u->peer_wake.private == other) {
 		__remove_wait_queue(&u_other->peer_wait, &u->peer_wake);
 		u->peer_wake.private = NULL;
 	}
@@ -426,7 +391,43 @@ static int unix_dgram_peer_wake_me(struct sock *sk, struct sock *other)
 	return 0;
 }
 
-static int unix_writable(const struct sock *sk)
+
+static inline struct sock *unix_find_socket_byname(struct net *net,
+						   struct sockaddr_un *sunname,
+						   int len, int type,
+						   unsigned int hash)
+{
+	struct sock *s;
+
+	spin_lock(&unix_table_lock);
+	s = __unix_find_socket_byname(net, sunname, len, type, hash);
+	if (s)
+		sock_hold(s);
+	spin_unlock(&unix_table_lock);
+	return s;
+}
+
+static struct sock *unix_find_socket_byinode(struct inode *i)
+{
+	struct sock *s;
+
+	spin_lock(&unix_table_lock);
+	sk_for_each(s,
+		    &unix_socket_table[i->i_ino & (UNIX_HASH_SIZE - 1)]) {
+		struct dentry *dentry = unix_sk(s)->path.dentry;
+
+		if (dentry && dentry->d_inode == i) {
+			sock_hold(s);
+			goto found;
+		}
+	}
+	s = NULL;
+found:
+	spin_unlock(&unix_table_lock);
+	return s;
+}
+
+static inline int unix_writable(struct sock *sk)
 {
 	return (atomic_read(&sk->sk_wmem_alloc) << 2) <= sk->sk_sndbuf;
 }

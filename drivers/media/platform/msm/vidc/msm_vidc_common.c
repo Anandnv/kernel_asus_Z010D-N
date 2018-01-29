@@ -51,39 +51,6 @@
 #define IS_SYS_CMD_VALID(cmd) (((cmd) >= SYS_MSG_START) && \
 		((cmd) <= SYS_MSG_END))
 
-const char *const mpeg_video_vidc_extradata[] = {
-	"Extradata none",
-	"Extradata MB Quantization",
-	"Extradata Interlace Video",
-	"Extradata VC1 Framedisp",
-	"Extradata VC1 Seqdisp",
-	"Extradata timestamp",
-	"Extradata S3D Frame Packing",
-	"Extradata Frame Rate",
-	"Extradata Panscan Window",
-	"Extradata Recovery point SEI",
-	"Extradata Multislice info",
-	"Extradata number of concealed MB",
-	"Extradata metadata filler",
-	"Extradata input crop",
-	"Extradata digital zoom",
-	"Extradata aspect ratio",
-	"Extradata mpeg2 seqdisp",
-	"Extradata stream userdata",
-	"Extradata frame QP",
-	"Extradata frame bits info",
-	"Extradata LTR",
-	"Extradata macroblock metadata",
-	"Extradata VQZip SEI",
-	"Extradata YUV Stats",
-	"Extradata ROI QP",
-	"Extradata output crop",
-	"Extradata display colour SEI",
-	"Extradata light level SEI",
-	"Extradata display VUI",
-	"Extradata vpx color space",
-};
-
 struct getprop_buf {
 	struct list_head list;
 	void *data;
@@ -115,6 +82,7 @@ static inline bool is_non_realtime_session(struct msm_vidc_inst *inst)
 	rc = v4l2_g_ctrl(&inst->ctrl_handler, &ctrl);
 	return (!rc && ctrl.value);
 }
+
 enum multi_stream msm_comm_get_stream_output_mode(struct msm_vidc_inst *inst)
 {
 	if (inst->session_type == MSM_VIDC_DECODER) {
@@ -162,7 +130,7 @@ static inline int msm_comm_count_active_instances(struct msm_vidc_core *core)
 	int active_instances = 0;
 	struct msm_vidc_inst *inst = NULL;
 	if (!core) {
-		dprintk(VIDC_ERR, "%s: Invalid args: %pK\n", __func__, core);
+		dprintk(VIDC_ERR, "%s: Invalid args: %p\n", __func__, core);
 		return -EINVAL;
 	}
 
@@ -207,7 +175,7 @@ static int msm_comm_get_inst_load(struct msm_vidc_inst *inst,
 	if (is_non_realtime_session(inst) &&
 		(quirks & LOAD_CALC_IGNORE_NON_REALTIME_LOAD)) {
 		if (!inst->prop.fps) {
-			dprintk(VIDC_INFO, "%s: instance:%pK prop->fps is set 0\n", __func__, inst);
+			dprintk(VIDC_INFO, "%s: instance:%pK prop->fps is set 0\n", __func__, inst);			
 			load = 0;
 		} else
 			load = msm_comm_get_mbs_per_sec(inst) / inst->prop.fps;
@@ -494,7 +462,7 @@ static void handle_sys_init_done(enum command_response cmd, void *data)
 				HAL_VIDEO_CODEC_MVC;
 	dprintk(VIDC_DBG, "supported_codecs: enc = 0x%x, dec = 0x%x\n",
 		core->enc_codec_supported, core->dec_codec_supported);
-	dprintk(VIDC_DBG, "ptr[%d] = %pK\n", index, &(core->completions[index]));
+	dprintk(VIDC_DBG, "ptr[%d] = %p\n", index, &(core->completions[index]));
 	complete(&(core->completions[index]));
 }
 
@@ -755,7 +723,7 @@ static void handle_event_change(enum command_response cmd, void *data)
 			u32 *ptr = NULL;
 
 			dprintk(VIDC_DBG,
-				"%s - inst: %pK buffer: 0x%pa extra: 0x%pa\n",
+				"%s - inst: %p buffer: 0x%pa extra: 0x%pa\n",
 				__func__, inst, &event_notify->packet_buffer,
 				&event_notify->extra_data_buffer);
 
@@ -1269,12 +1237,12 @@ void msm_comm_session_clean(struct msm_vidc_inst *inst)
 	hdev = inst->core->device;
 	mutex_lock(&inst->lock);
 	if (hdev && inst->session) {
-		dprintk(VIDC_DBG, "cleaning up instance: 0x%pK\n", inst);
+		dprintk(VIDC_DBG, "cleaning up instance: 0x%p\n", inst);
 		rc = call_hfi_op(hdev, session_clean,
 				(void *) inst->session);
 		if (rc) {
 			dprintk(VIDC_ERR,
-				"Session clean failed :%pK\n", inst);
+				"Session clean failed :%p\n", inst);
 		}
 		inst->session = NULL;
 	}
@@ -1842,7 +1810,7 @@ void msm_comm_init_dcvs_load(struct msm_vidc_inst *inst)
 	dprintk(VIDC_DBG, "Init DCVS Load\n");
 
 	if (!inst || !inst->core) {
-		dprintk(VIDC_ERR, "%s Invalid args: %pK\n", __func__, inst);
+		dprintk(VIDC_ERR, "%s Invalid args: %p\n", __func__, inst);
 		return;
 	}
 
@@ -1886,7 +1854,7 @@ void msm_comm_init_dcvs(struct msm_vidc_inst *inst)
 	dprintk(VIDC_DBG, "Init DCVS Struct\n");
 
 	if (!inst) {
-		dprintk(VIDC_ERR, "%s Invalid args: %pK\n", __func__, inst);
+		dprintk(VIDC_ERR, "%s Invalid args: %p\n", __func__, inst);
 		return;
 	}
 
@@ -1903,7 +1871,7 @@ static void msm_comm_dcvs_monitor_buffer(struct msm_vidc_inst *inst)
 	struct hal_buffer_requirements *output_buf_req;
 
 	if (!inst) {
-		dprintk(VIDC_ERR, "%s Invalid args: %pK\n", __func__, inst);
+		dprintk(VIDC_ERR, "%s Invalid args: %p\n", __func__, inst);
 		return;
 	}
 
@@ -1913,7 +1881,7 @@ static void msm_comm_dcvs_monitor_buffer(struct msm_vidc_inst *inst)
 	msm_comm_get_hal_output_buffer(inst));
 
 	if (!output_buf_req) {
-		dprintk(VIDC_ERR, "%s : Get output buffer req failed %pK\n",
+		dprintk(VIDC_ERR, "%s : Get output buffer req failed %p\n",
 			__func__, inst);
 		mutex_unlock(&inst->lock);
 		return;
@@ -2071,13 +2039,13 @@ static int msm_comm_scale_clocks(struct msm_vidc_core *core)
 	struct msm_vidc_inst *inst = NULL;
 
 	if (!core) {
-		dprintk(VIDC_ERR, "%s Invalid args: %pK\n", __func__, core);
+		dprintk(VIDC_ERR, "%s Invalid args: %p\n", __func__, core);
 		return -EINVAL;
 	}
 
 	hdev = core->device;
 	if (!hdev) {
-		dprintk(VIDC_ERR, "%s Invalid device handle: %pK\n",
+		dprintk(VIDC_ERR, "%s Invalid device handle: %p\n",
 			__func__, hdev);
 		return -EINVAL;
 	}
@@ -4315,18 +4283,6 @@ enum hal_extradata_id msm_comm_get_hal_extradata_index(
 		break;
 	case V4L2_MPEG_VIDC_EXTRADATA_METADATA_MBI:
 		ret = HAL_EXTRADATA_METADATA_MBI;
-		break;
-	case V4L2_MPEG_VIDC_EXTRADATA_DISPLAY_COLOUR_SEI:
-		ret = HAL_EXTRADATA_MASTERING_DISPLAY_COLOUR_SEI;
-		break;
-	case V4L2_MPEG_VIDC_EXTRADATA_CONTENT_LIGHT_LEVEL_SEI:
-		ret = HAL_EXTRADATA_CONTENT_LIGHT_LEVEL_SEI;
-		break;
-	case V4L2_MPEG_VIDC_EXTRADATA_VUI_DISPLAY:
-		ret = HAL_EXTRADATA_VUI_DISPLAY_INFO;
-		break;
-	case V4L2_MPEG_VIDC_EXTRADATA_VPX_COLORSPACE:
-		ret = HAL_EXTRADATA_VPX_COLORSPACE;
 		break;
 	default:
 		dprintk(VIDC_WARN, "Extradata not found: %d\n", index);

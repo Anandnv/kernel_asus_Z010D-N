@@ -69,6 +69,9 @@ enum usb_mode_type {
 	USB_PERIPHERAL,
 	USB_HOST,
 	USB_OTG,
+//ASUS_BSP+++ Landice "[ZE500KL][USBH][NA][Spec] Enable manual mode switching"
+	USB_AUTO,
+//ASUS_BSP--- Landice "[ZE500KL][USBH][NA][Spec] Enable manual mode switching"
 };
 
 /**
@@ -110,7 +113,6 @@ enum msm_usb_phy_type {
 
 #define IDEV_ACA_CHG_MAX	1500
 #define IDEV_ACA_CHG_LIMIT	500
-#define IDEV_HVDCP_CHG_MAX	1800
 
 /**
  * Different states involved in USB charger detection.
@@ -217,14 +219,6 @@ enum usb_ctrl {
 };
 
 /**
- * USB ID state
- */
-enum usb_id_state {
-	USB_ID_GROUND = 0,
-	USB_ID_FLOAT,
-};
-
-/**
  * struct msm_otg_platform_data - platform device data
  *              for msm_otg driver.
  * @phy_init_seq: PHY configuration sequence. val, reg pairs
@@ -315,6 +309,11 @@ struct msm_otg_platform_data {
 	int switch_sel_gpio;
 	bool phy_dvdd_always_on;
 	struct clk *system_clk;
+//ASUS_BSP+++ ShowWang "set otg current type as user switch"
+	int tps2546_ctl3_gpio;
+	int tps2546_status_gpio;
+	int tps2546_fault_gpio;
+//ASUS_BSP--- ShowWang "set otg current type as user switch"
 };
 
 /* phy related flags */
@@ -428,7 +427,6 @@ struct msm_otg_platform_data {
  * @dbg_idx: Dynamic debug buffer Index.
  * @dbg_lock: Dynamic debug buffer Lock.
  * @buf: Dynamic Debug Buffer.
- * @id_state: Indicates USBID line status.
  */
 struct msm_otg {
 	struct usb_phy phy;
@@ -569,7 +567,6 @@ struct msm_otg {
 	struct qpnp_vadc_chip	*vadc_dev;
 	int ext_id_irq;
 	bool phy_irq_pending;
-	bool rm_pulldown;
 	wait_queue_head_t	host_suspend_wait;
 /* Maximum debug message length */
 #define DEBUG_MSG_LEN   128UL
@@ -578,7 +575,9 @@ struct msm_otg {
 	unsigned int dbg_idx;
 	rwlock_t dbg_lock;
 	char (buf[DEBUG_MAX_MSG])[DEBUG_MSG_LEN];   /* buffer */
-	enum usb_id_state id_state;
+//ASUS_BSP+++ Landice "[ZE500KL][USBH][NA][Spec] Enable manual mode switching"
+	enum usb_mode_type otg_mode;
+//ASUS_BSP--- Landice "[ZE500KL][USBH][NA][Spec] Enable manual mode switching"
 };
 
 struct ci13xxx_platform_data {

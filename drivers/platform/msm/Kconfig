@@ -204,6 +204,7 @@ config MSM_BUS_SCALING
 		for the active devices needs without keeping the clocks at max
 		frequency when a slower speed is sufficient.
 
+
 config BUS_TOPOLOGY_ADHOC
 	bool "ad-hoc bus scaling topology"
 	default n

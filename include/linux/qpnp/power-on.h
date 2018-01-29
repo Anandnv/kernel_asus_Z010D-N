@@ -48,16 +48,13 @@ enum pon_power_off_type {
 };
 
 enum pon_restart_reason {
-	PON_RESTART_REASON_UNKNOWN	        = 0x00,
-	PON_RESTART_REASON_RECOVERY	        = 0x01,
-	PON_RESTART_REASON_BOOTLOADER	        = 0x02,
-	PON_RESTART_REASON_RTC		        = 0x03,
-        PON_RESTART_REASON_DMVERITY_CORRUPTED   = 0x04,
-        PON_RESTART_REASON_DMVERITY_ENFORCE     = 0x05,
-        PON_RESTART_REASON_KEYS_CLEAR           = 0x06,
+	PON_RESTART_REASON_UNKNOWN	= 0x00,
+	PON_RESTART_REASON_RECOVERY	= 0x01,
+	PON_RESTART_REASON_BOOTLOADER	= 0x02,
+	PON_RESTART_REASON_RTC		= 0x03,
 };
 
-#ifdef CONFIG_QPNP_POWER_ON
+#if ((defined CONFIG_QPNP_POWER_ON) || (defined CONFIG_QPNP_POWER_ON_ZC550KL))
 int qpnp_pon_system_pwr_off(enum pon_power_off_type type);
 int qpnp_pon_is_warm_reset(void);
 int qpnp_pon_trigger_config(enum pon_trigger_source pon_src, bool enable);

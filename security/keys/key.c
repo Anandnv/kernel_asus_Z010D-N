@@ -547,7 +547,7 @@ int key_reject_and_link(struct key *key,
 	awaken = 0;
 	ret = -EBUSY;
 
-	if (keyring)
+	if (keyring && link_ret == 0)
 		link_ret = __key_link_begin(keyring, key->type,
 					    key->description, &prealloc);
 
@@ -580,7 +580,7 @@ int key_reject_and_link(struct key *key,
 
 	mutex_unlock(&key_construction_mutex);
 
-	if (keyring && link_ret == 0)
+	if (keyring)
 		__key_link_end(keyring, key->type, prealloc);
 
 	/* wake up anyone waiting for a key to be constructed */

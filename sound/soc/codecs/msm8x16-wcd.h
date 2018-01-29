@@ -215,6 +215,9 @@ struct msm8916_asoc_mach_data {
 	int ext_pa;
 	int us_euro_gpio;
 	int spk_ext_pa_gpio;
+	#ifdef ASUS_ZC550KL_PROJECT
+	int spk_amp_gpio;//mei_huang +++ for speaker config
+	#endif
 	int mclk_freq;
 	int lb_mode;
 	u8 micbias1_cap_mode;
@@ -226,7 +229,6 @@ struct msm8916_asoc_mach_data {
 	struct mutex wsa_mclk_mutex;
 	struct delayed_work disable_mclk_work;
 	struct afe_digital_clk_cfg digital_cdc_clk;
-	struct afe_clk_set digital_cdc_core_clk;
 	void __iomem *vaddr_gpio_mux_spkr_ctl;
 	void __iomem *vaddr_gpio_mux_mic_ctl;
 	void __iomem *vaddr_gpio_mux_quin_ctl;

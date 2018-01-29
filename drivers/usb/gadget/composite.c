@@ -21,6 +21,23 @@
 #include <linux/usb/composite.h>
 #include <asm/unaligned.h>
 
+static bool detectMACByConfig = 0;
+static bool hostTypeChanged = 0;
+
+//ASUS_BSP+++ "[ZE500KL][USB][NA][Other]Add ECM support for MAC"
+extern int getMACConnect(void){
+	return detectMACByConfig;
+}
+
+extern int getHostTypeChanged(void){
+	return hostTypeChanged;
+}
+
+extern void resetHostTypeChanged(void){
+	hostTypeChanged = 0;
+}
+//ASUS_BSP--- "[ZE500KL][USB][NA][Other]Add ECM support for MAC"
+
 /*
  * The code in this file is utility code, used to build a gadget driver
  * from one or more "function" drivers, one or more "configuration"
@@ -181,7 +198,7 @@ int usb_add_function(struct usb_configuration *config,
 {
 	int	value = -EINVAL;
 
-	DBG(config->cdev, "adding '%s'/%pK to config '%s'/%pK\n",
+	DBG(config->cdev, "adding '%s'/%p to config '%s'/%p\n",
 			function->name, function,
 			config->label, config);
 
@@ -215,7 +232,7 @@ int usb_add_function(struct usb_configuration *config,
 
 done:
 	if (value)
-		DBG(config->cdev, "adding '%s'/%pK --> %d\n",
+		DBG(config->cdev, "adding '%s'/%p --> %d\n",
 				function->name, function, value);
 	return value;
 }
@@ -473,7 +490,7 @@ static int config_buf(struct usb_configuration *config,
 	c->bLength = USB_DT_CONFIG_SIZE;
 	c->bDescriptorType = type;
 	/* wTotalLength is written later */
-	c->bNumInterfaces = config->next_interface_id;
+	c->bNumInterfaces = config->next_interface_id - detectMACByConfig;
 	c->bConfigurationValue = config->bConfigurationValue;
 	c->iConfiguration = config->iConfiguration;
 	c->bmAttributes = USB_CONFIG_ATT_ONE | config->bmAttributes;
@@ -506,6 +523,13 @@ static int config_buf(struct usb_configuration *config,
 
 		if (!descriptors)
 			continue;
+		//ASUS_BSP+++ "[ZE500KL][USB][NA][Other]Add ECM support for MAC"
+		if (detectMACByConfig && !strcmp(f->name,"Mass Storage Function"))
+		{
+			printk("[USB] ingore mass storage\n");
+			continue;
+		}
+		//ASUS_BSP--- "[ZE500KL][USB][NA][Other]Add ECM support for MAC"
 		status = usb_descriptor_fillbuf(next, len,
 			(const struct usb_descriptor_header **) descriptors);
 		if (status < 0)
@@ -752,6 +776,8 @@ static int set_config(struct usb_composite_dev *cdev,
 	     usb_speed_string(gadget->speed),
 	     number, c ? c->label : "unconfigured");
 
+	printk("[USB] speed:%d\n",gadget->speed);
+
 	if (!c)
 		goto done;
 
@@ -809,7 +835,7 @@ static int set_config(struct usb_composite_dev *cdev,
 
 		result = f->set_alt(f, tmp, 0);
 		if (result < 0) {
-			DBG(cdev, "interface %d (%s/%pK) alt 0 --> %d\n",
+			DBG(cdev, "interface %d (%s/%p) alt 0 --> %d\n",
 					tmp, f->name, f, result);
 
 			reset_config(cdev);
@@ -884,7 +910,7 @@ int usb_add_config(struct usb_composite_dev *cdev,
 	if (!bind)
 		goto done;
 
-	DBG(cdev, "adding config #%u '%s'/%pK\n",
+	DBG(cdev, "adding config #%u '%s'/%p\n",
 			config->bConfigurationValue,
 			config->label, config);
 
@@ -901,7 +927,7 @@ int usb_add_config(struct usb_composite_dev *cdev,
 					struct usb_function, list);
 			list_del(&f->list);
 			if (f->unbind) {
-				DBG(cdev, "unbind function '%s'/%pK\n",
+				DBG(cdev, "unbind function '%s'/%p\n",
 					f->name, f);
 				f->unbind(config, f);
 				/* may free memory for "f" */
@@ -912,7 +938,7 @@ int usb_add_config(struct usb_composite_dev *cdev,
 	} else {
 		unsigned	i;
 
-		DBG(cdev, "cfg %d/%pK speeds:%s%s%s\n",
+		DBG(cdev, "cfg %d/%p speeds:%s%s%s\n",
 			config->bConfigurationValue, config,
 			config->superspeed ? " super" : "",
 			config->highspeed ? " high" : "",
@@ -927,7 +953,7 @@ int usb_add_config(struct usb_composite_dev *cdev,
 
 			if (!f)
 				continue;
-			DBG(cdev, "  interface %d = %s/%pK\n",
+			DBG(cdev, "  interface %d = %s/%p\n",
 				i, f->name, f);
 		}
 	}
@@ -955,13 +981,13 @@ static void unbind_config(struct usb_composite_dev *cdev,
 				struct usb_function, list);
 		list_del(&f->list);
 		if (f->unbind) {
-			DBG(cdev, "unbind function '%s'/%pK\n", f->name, f);
+			DBG(cdev, "unbind function '%s'/%p\n", f->name, f);
 			f->unbind(config, f);
 			/* may free memory for "f" */
 		}
 	}
 	if (config->unbind) {
-		DBG(cdev, "unbind config '%s'/%pK\n", config->label, config);
+		DBG(cdev, "unbind config '%s'/%p\n", config->label, config);
 		config->unbind(config);
 			/* may free memory for "c" */
 	}
@@ -1389,6 +1415,14 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 		switch (w_value >> 8) {
 
 		case USB_DT_DEVICE:
+			//ASUS_BSP+++ "[ZE500KL][USB][NA][Other]Add ECM support for MAC"
+			if(w_length==0x40){
+				if(detectMACByConfig==1){
+					hostTypeChanged=1;
+				}
+				detectMACByConfig=0;
+			}
+			//ASUS_BSP--- "[ZE500KL][USB][NA][Other]Add ECM support for MAC"
 			cdev->desc.bNumConfigurations =
 				count_configs(cdev, USB_DT_DEVICE);
 			cdev->desc.bMaxPacketSize0 =
@@ -1422,6 +1456,14 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 				break;
 			/* FALLTHROUGH */
 		case USB_DT_CONFIG:
+			//ASUS_BSP+++ "[ZE500KL][USB][NA][Other]Add ECM support for MAC"
+			if(w_length==0x4){
+				if(detectMACByConfig==0){
+					hostTypeChanged=1;
+				}
+				detectMACByConfig=1;
+			}
+			//ASUS_BSP--- "[ZE500KL][USB][NA][Other]Add ECM support for MAC"
 			value = config_desc(cdev, w_value);
 			if (value >= 0)
 				value = min(w_length, (u16) value);

@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -84,9 +84,6 @@ enum {
 	MSM_FRONTEND_DAI_MULTIMEDIA14,
 	MSM_FRONTEND_DAI_MULTIMEDIA15,
 	MSM_FRONTEND_DAI_MULTIMEDIA16,
-	MSM_FRONTEND_DAI_MULTIMEDIA17,
-	MSM_FRONTEND_DAI_MULTIMEDIA18,
-	MSM_FRONTEND_DAI_MULTIMEDIA19,
 	MSM_FRONTEND_DAI_CS_VOICE,
 	MSM_FRONTEND_DAI_VOIP,
 	MSM_FRONTEND_DAI_AFE_RX,
@@ -107,13 +104,11 @@ enum {
 	MSM_FRONTEND_DAI_LSM8,
 	MSM_FRONTEND_DAI_VOICE2_STUB,
 	MSM_FRONTEND_DAI_VOWLAN,
-	MSM_FRONTEND_DAI_VOICEMMODE1,
-	MSM_FRONTEND_DAI_VOICEMMODE2,
 	MSM_FRONTEND_DAI_MAX,
 };
 
-#define MSM_FRONTEND_DAI_MM_SIZE (MSM_FRONTEND_DAI_MULTIMEDIA19 + 1)
-#define MSM_FRONTEND_DAI_MM_MAX_ID MSM_FRONTEND_DAI_MULTIMEDIA19
+#define MSM_FRONTEND_DAI_MM_SIZE (MSM_FRONTEND_DAI_MULTIMEDIA16 + 1)
+#define MSM_FRONTEND_DAI_MM_MAX_ID MSM_FRONTEND_DAI_MULTIMEDIA16
 
 enum {
 	MSM_BACKEND_DAI_PRI_I2S_RX = 0,
@@ -203,7 +198,7 @@ struct msm_pcm_routing_bdai_data {
 	unsigned int  sample_rate;
 	unsigned int  channel;
 	unsigned int  format;
-	u32 passthr_mode;
+	u32 compr_passthr_mode;
 	char *name;
 };
 
@@ -256,7 +251,5 @@ void msm_pcm_routing_acquire_lock(void);
 void msm_pcm_routing_release_lock(void);
 
 void msm_pcm_routing_reg_stream_app_type_cfg(int fedai_id, int app_type,
-                                        int acdb_dev_id, int sample_rate, int session_type);
-int msm_pcm_routing_get_stream_app_type_cfg(int fedai_id, int session_type,
-                        int *app_type, int *acdb_dev_id, int *sample_rate);
+					int acdb_dev_id, int sample_rate);
 #endif /*_MSM_PCM_H*/

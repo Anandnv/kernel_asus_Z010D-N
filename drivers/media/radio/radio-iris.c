@@ -62,12 +62,6 @@ static void radio_hci_cmd_task(unsigned long arg);
 static void radio_hci_rx_task(unsigned long arg);
 static struct video_device *video_get_dev(void);
 static DEFINE_RWLOCK(hci_task_lock);
-extern struct mutex fm_smd_enable;
-
-typedef int (*radio_hci_request_func)(struct radio_hci_dev *hdev,
-		int (*req)(struct
-		radio_hci_dev * hdev, unsigned long param),
-		unsigned long param, __u32 timeout);
 
 struct iris_device {
 	struct device *dev;
@@ -79,7 +73,6 @@ struct iris_device {
 	struct completion sync_xfr_start;
 	int tune_req;
 	unsigned int mode;
-	int is_fm_closing;
 
 	__u16 pi;
 	__u8 pty;
@@ -618,24 +611,22 @@ int radio_hci_register_dev(struct radio_hci_dev *hdev)
 }
 EXPORT_SYMBOL(radio_hci_register_dev);
 
-int radio_hci_unregister_dev(void)
+int radio_hci_unregister_dev(struct radio_hci_dev *hdev)
 {
 	struct iris_device *radio = video_get_drvdata(video_get_dev());
-	struct radio_hci_dev *hdev = NULL;
-
-	if (!radio && !radio->fm_hdev) {
-		FMDERR("radio/hdev is null");
+	if (!radio) {
+		FMDERR(":radio is null");
 		return -EINVAL;
 	}
-	hdev = radio->fm_hdev;
 
 	tasklet_kill(&hdev->rx_task);
 	tasklet_kill(&hdev->cmd_task);
 	skb_queue_purge(&hdev->rx_q);
 	skb_queue_purge(&hdev->cmd_q);
 	skb_queue_purge(&hdev->raw_q);
+	kfree(radio->fm_hdev);
+	kfree(radio->videodev);
 
-	radio->fm_hdev = NULL;
 	return 0;
 }
 EXPORT_SYMBOL(radio_hci_unregister_dev);
@@ -696,6 +687,15 @@ int radio_hci_send_cmd(struct radio_hci_dev *hdev, __u16 opcode, __u32 plen,
 	return ret;
 }
 EXPORT_SYMBOL(radio_hci_send_cmd);
+
+
+//+++Alpha:"create proc mode file to monitor FM enable/disable status"+++
+#include <linux/proc_fs.h>
+#include <linux/seq_file.h>
+#include <../fs/proc/internal.h>
+int FMStatus = 0;
+//---Alpha:"create proc mode file to monitor FM enable/disable status"---
+EXPORT_SYMBOL(FMStatus); //ASUS BSP HANS
 
 static int hci_fm_enable_recv_req(struct radio_hci_dev *hdev,
 	unsigned long param)
@@ -1311,7 +1311,7 @@ static int radio_hci_err(__u32 code)
 static int __radio_hci_request(struct radio_hci_dev *hdev,
 		int (*req)(struct radio_hci_dev *hdev,
 			unsigned long param),
-			unsigned long param, __u32 timeout, int interruptible)
+			unsigned long param, __u32 timeout)
 {
 	int err = 0;
 	DECLARE_WAITQUEUE(wait, current);
@@ -1325,10 +1325,7 @@ static int __radio_hci_request(struct radio_hci_dev *hdev,
 	hdev->req_status = HCI_REQ_PEND;
 
 	add_wait_queue(&hdev->req_wait_q, &wait);
-	if (interruptible)
-		set_current_state(TASK_INTERRUPTIBLE);
-	else
-		set_current_state(TASK_UNINTERRUPTIBLE);
+	set_current_state(TASK_INTERRUPTIBLE);
 
 	err = req(hdev, param);
 
@@ -1336,7 +1333,7 @@ static int __radio_hci_request(struct radio_hci_dev *hdev,
 
 	remove_wait_queue(&hdev->req_wait_q, &wait);
 
-	if (interruptible && signal_pending(current)) {
+	if (signal_pending(current)) {
 		mutex_unlock(&iris_fm);
 		return -EINTR;
 	}
@@ -1357,36 +1354,16 @@ static int __radio_hci_request(struct radio_hci_dev *hdev,
 	return err;
 }
 
-static inline int radio_hci_request_interruptible(struct radio_hci_dev *hdev,
-		int (*req)(struct
-		radio_hci_dev * hdev, unsigned long param),
-		unsigned long param, __u32 timeout)
-{
-	int ret = 0;
-
-	ret = __radio_hci_request(hdev, req, param, timeout, 1);
-
-	return ret;
-}
-
-static inline int radio_hci_request_uninterruptible(struct radio_hci_dev *hdev,
-		int (*req)(struct
-		radio_hci_dev * hdev, unsigned long param),
-		unsigned long param, __u32 timeout)
-{
-	int ret = 0;
-
-	ret = __radio_hci_request(hdev, req, param, timeout, 0);
-
-	return ret;
-}
-
 static inline int radio_hci_request(struct radio_hci_dev *hdev,
 		int (*req)(struct
 		radio_hci_dev * hdev, unsigned long param),
 		unsigned long param, __u32 timeout)
 {
-	return radio_hci_request_interruptible(hdev, req, param, timeout);
+	int ret = 0;
+
+	ret = __radio_hci_request(hdev, req, param, timeout);
+
+	return ret;
 }
 
 static inline int hci_conf_event_mask(__u8 *arg,
@@ -1759,18 +1736,13 @@ static int hci_set_blend_tbl_req(struct hci_fm_blend_table *arg,
 	return ret;
 }
 
-static int hci_cmd_internal(unsigned int cmd, struct radio_hci_dev *hdev,
-		int interruptible)
+static int hci_cmd(unsigned int cmd, struct radio_hci_dev *hdev)
 {
 	int ret = 0;
 	unsigned long arg = 0;
-	radio_hci_request_func radio_hci_request;
 
 	if (!hdev)
 		return -ENODEV;
-
-	radio_hci_request = interruptible ? radio_hci_request_interruptible :
-			radio_hci_request_uninterruptible;
 
 	switch (cmd) {
 	case HCI_FM_ENABLE_RECV_CMD:
@@ -1868,17 +1840,6 @@ static int hci_cmd_internal(unsigned int cmd, struct radio_hci_dev *hdev,
 	return ret;
 }
 
-
-static int hci_cmd(unsigned int cmd, struct radio_hci_dev *hdev)
-{
-	return hci_cmd_internal(cmd, hdev, 1);
-}
-
-static int hci_cmd_uninterruptible(unsigned int cmd, struct radio_hci_dev *hdev)
-{
-	return hci_cmd_internal(cmd, hdev, 0);
-}
-
 static void radio_hci_req_complete(struct radio_hci_dev *hdev, int result)
 {
 
@@ -1888,7 +1849,7 @@ static void radio_hci_req_complete(struct radio_hci_dev *hdev, int result)
 	}
 	hdev->req_result = result;
 	hdev->req_status = HCI_REQ_DONE;
-	wake_up(&hdev->req_wait_q);
+	wake_up_interruptible(&hdev->req_wait_q);
 }
 
 static void radio_hci_status_complete(struct radio_hci_dev *hdev, int result)
@@ -1899,7 +1860,7 @@ static void radio_hci_status_complete(struct radio_hci_dev *hdev, int result)
 	}
 	hdev->req_result = result;
 	hdev->req_status = HCI_REQ_STATUS;
-	wake_up(&hdev->req_wait_q);
+	wake_up_interruptible(&hdev->req_wait_q);
 }
 
 static void hci_cc_rsp(struct radio_hci_dev *hdev, struct sk_buff *skb)
@@ -1933,8 +1894,7 @@ static void hci_cc_fm_disable_rsp(struct radio_hci_dev *hdev,
 
 	status = *((__u8 *) skb->data);
 	if ((radio->mode == FM_TURNING_OFF) && (status == 0)) {
-		if (!radio->is_fm_closing)
-			iris_q_event(radio, IRIS_EVT_RADIO_DISABLED);
+		iris_q_event(radio, IRIS_EVT_RADIO_DISABLED);
 		radio_hci_req_complete(hdev, status);
 		radio->mode = FM_OFF;
 	} else if (radio->mode == FM_CALIB) {
@@ -3704,7 +3664,6 @@ static int iris_vidioc_s_ext_ctrls(struct file *file, void *priv,
 	struct hci_fm_set_cal_req_proc proc_cal_req;
 	struct hci_fm_set_spur_table_req spur_tbl_req;
 	char *spur_data;
-	char tmp_buf[2];
 
 	struct iris_device *radio = video_get_drvdata(video_devdata(file));
 	char *data = NULL;
@@ -3843,32 +3802,23 @@ static int iris_vidioc_s_ext_ctrls(struct file *file, void *priv,
 	case V4L2_CID_PRIVATE_IRIS_SET_SPURTABLE:
 		memset(&spur_tbl_req, 0, sizeof(spur_tbl_req));
 		data = (ctrl->controls[0]).string;
-		if (copy_from_user(&bytes_to_copy, &((ctrl->controls[0]).size),
-					sizeof(bytes_to_copy))) {
-			retval = -EFAULT;
-			goto END;
-		}
-		if (copy_from_user(&tmp_buf[0], &data[0],
-					sizeof(tmp_buf))) {
-			retval = -EFAULT;
-			goto END;
-		}
-		spur_tbl_req.mode = tmp_buf[0];
-		spur_tbl_req.no_of_freqs_entries = tmp_buf[1];
+		bytes_to_copy = (ctrl->controls[0]).size;
+		spur_tbl_req.mode = data[0];
+		spur_tbl_req.no_of_freqs_entries = data[1];
 
 		if (((spur_tbl_req.no_of_freqs_entries * SPUR_DATA_LEN) !=
 					bytes_to_copy - 2) ||
-		    ((spur_tbl_req.no_of_freqs_entries * SPUR_DATA_LEN) >
+			((spur_tbl_req.no_of_freqs_entries * SPUR_DATA_LEN) >
 					2 * FM_SPUR_TBL_SIZE)) {
-			FMDERR("Invalid data len: data[1] = %d, bytes = %zu",
-				spur_tbl_req.no_of_freqs_entries,
-				bytes_to_copy);
+			FMDERR("data is more/less than expected value. data[1] = %d,"
+					"bytes_to_copy = %zu", spur_tbl_req.no_of_freqs_entries,
+					bytes_to_copy);
 			retval = -EINVAL;
 			goto END;
 		}
-		spur_data =
-		    kmalloc((spur_tbl_req.no_of_freqs_entries * SPUR_DATA_LEN)
-							+ 2, GFP_ATOMIC);
+		spur_data = kmalloc((spur_tbl_req.no_of_freqs_entries * SPUR_DATA_LEN)
+								+ 2, GFP_ATOMIC);
+
 		if (!spur_data) {
 			FMDERR("Allocation failed for Spur data");
 			retval = -EFAULT;
@@ -3883,8 +3833,7 @@ static int iris_vidioc_s_ext_ctrls(struct file *file, void *priv,
 
 		if (spur_tbl_req.no_of_freqs_entries <= ENTRIES_EACH_CMD) {
 			memcpy(&spur_tbl_req.spur_data[0], spur_data,
-				(spur_tbl_req.no_of_freqs_entries *
-							SPUR_DATA_LEN));
+					(spur_tbl_req.no_of_freqs_entries * SPUR_DATA_LEN));
 			retval = radio_hci_request(radio->fm_hdev,
 					hci_fm_set_spur_tbl_req,
 					(unsigned long)&spur_tbl_req,
@@ -4041,6 +3990,13 @@ static int iris_vidioc_s_ctrl(struct file *file, void *priv,
 					radio->mode = FM_OFF;
 					goto END;
 				}
+				printk("Enable FM OK\n");
+//ASUS_BSP+++ Show_Wang "[ZC550KL][FM][NA][Spec] add ASUSEvtlog for FM"
+				ASUSEvtlog("[FM] On\n");
+//ASUS_BSP--- Show_Wang "[ZC550KL][FM][NA][Spec] add ASUSEvtlog for FM"
+				//+++Alpha:"create proc mode file to monitor FM enable/disable status"+++
+				FMStatus = 1;
+				//---Alpha:"create proc mode file to monitor FM enable/disable status"---
 			}
 			if (radio->mode == FM_RECV_TURNING_ON) {
 				radio->mode = FM_RECV;
@@ -4088,6 +4044,14 @@ static int iris_vidioc_s_ctrl(struct file *file, void *priv,
 						   " %d\n", retval);
 					radio->mode = FM_RECV;
 					goto END;
+				} else {
+					printk("Disable FM OK\n");
+//ASUS_BSP+++ Show_Wang "[ZC550KL][FM][NA][Spec] add ASUSEvtlog for FM"
+					ASUSEvtlog("[FM] Off\n");
+//ASUS_BSP--- Show_Wang "[ZC550KL][FM][NA][Spec] add ASUSEvtlog for FM"
+					//+++Alpha:"create proc mode file to monitor FM enable/disable status"+++
+					FMStatus = 0;
+					//---Alpha:"create proc mode file to monitor FM enable/disable status"---
 				}
 				break;
 			case FM_TRANS:
@@ -5187,6 +5151,8 @@ static int iris_vidioc_s_frequency(struct file *file, void *priv,
 
 	if (retval < 0)
 		FMDERR(" set frequency failed with %d\n", retval);
+	else
+		printk("Set FM freq %d OK\n", freq->frequency);
 	return retval;
 }
 
@@ -5203,29 +5169,20 @@ static int iris_fops_release(struct file *file)
 		goto END;
 
 	if (radio->mode == FM_RECV) {
-		radio->is_fm_closing = 1;
-		radio->mode = FM_TURNING_OFF;
-		retval = hci_cmd_uninterruptible(HCI_FM_DISABLE_RECV_CMD,
-				radio->fm_hdev);
 		radio->mode = FM_OFF;
-		radio->is_fm_closing = 0;
+		retval = hci_cmd(HCI_FM_DISABLE_RECV_CMD,
+						radio->fm_hdev);
 	} else if (radio->mode == FM_TRANS) {
-		radio->is_fm_closing = 1;
-		radio->mode = FM_TURNING_OFF;
-		retval = hci_cmd_uninterruptible(HCI_FM_DISABLE_TRANS_CMD,
-				radio->fm_hdev);
 		radio->mode = FM_OFF;
-		radio->is_fm_closing = 0;
+		retval = hci_cmd(HCI_FM_DISABLE_TRANS_CMD,
+					radio->fm_hdev);
 	} else if (radio->mode == FM_CALIB) {
 		radio->mode = FM_OFF;
 		return retval;
 	}
 END:
-	mutex_lock(&fm_smd_enable);
 	if (radio->fm_hdev != NULL)
 		radio->fm_hdev->close_smd();
-	mutex_unlock(&fm_smd_enable);
-
 	if (retval < 0)
 		FMDERR("Err on disable FM %d\n", retval);
 
@@ -5334,7 +5291,9 @@ static int initialise_recv(struct iris_device *radio)
 		return -EINVAL;
 	}
 
-	radio->mute_mode.soft_mute = CTRL_ON;
+	//+++BSP Eric Ou: Disable soft mute
+	//radio->mute_mode.soft_mute = CTRL_ON;
+	radio->mute_mode.soft_mute = CTRL_OFF;
 	retval = hci_set_fm_mute_mode(&radio->mute_mode,
 					radio->fm_hdev);
 
@@ -5342,6 +5301,7 @@ static int initialise_recv(struct iris_device *radio)
 		FMDERR("Failed to enable Smute\n");
 		return retval;
 	}
+	//---BSP Eric Ou: Disable soft mute
 
 	radio->stereo_mode.stereo_mode = CTRL_OFF;
 	radio->stereo_mode.sig_blend = sig_blend;
@@ -5365,6 +5325,28 @@ static int initialise_recv(struct iris_device *radio)
 	retval = hci_cmd(HCI_FM_GET_RECV_CONF_CMD, radio->fm_hdev);
 	if (retval < 0)
 		FMDERR("Failed to get the Recv Config\n");
+
+	//+++ASUS:When enable FM, set SINR to a low value, then more FM stations can be found+++
+	retval = hci_cmd(HCI_FM_GET_DET_CH_TH_CMD, radio->fm_hdev);
+	if (retval < 0) {
+		FMDERR("Failed to get chnl det thresholds  %d", retval);
+		return retval;
+	}
+//ASUS_BSP+++ Show_Wang "[ZC550KL][FM][NA][Other] set FM SINR to 8 as HW suggest"
+#ifdef ASUS_ZC550KL_PROJECT
+	radio->ch_det_threshold.sinr = 8;
+#else
+	radio->ch_det_threshold.sinr = 1;//This value is set according to VD's test result
+#endif
+//ASUS_BSP--- Show_Wang "[ZC550KL][FM][NA][Other] set FM SINR to 8 as HW suggest"
+
+	retval = hci_set_ch_det_thresholds_req(&radio->ch_det_threshold, radio->fm_hdev);
+	if (retval < 0) {
+		FMDERR("Failed to set SINR threshold %d", retval);
+		return retval;
+	}
+	//---ASUS:When enable FM, set SINR to a low value, then more FM stations can be found---
+
 	return retval;
 }
 
@@ -5447,6 +5429,50 @@ static struct video_device *video_get_dev(void)
 	return priv_videodev;
 }
 
+//+++Alpha:"create proc mode file to monitor FM enable/disable status"+++
+#define FM_DEBUG_PROC_FILE  "driver/fmradio"
+static struct proc_dir_entry *fm_debug_proc_file;
+
+static int fm_debug_proc_read(struct seq_file *s, void *unused)
+{
+	if(FMStatus==0)
+	{
+		seq_printf(s, "off\n");
+	}
+	else
+	{
+		seq_printf(s,"on\n");
+	}
+	return 0;
+}
+
+static int fm_proc_mode_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, fm_debug_proc_read, PDE(inode)->data);
+}
+
+static struct file_operations fm_debug_proc_ops = {
+	.open = fm_proc_mode_open,
+	.read = seq_read,
+};
+
+static void create_fm_debug_proc_file(void)
+{
+    //printk("[FM] create_fm_debug_proc_file\n");
+    fm_debug_proc_file = proc_create(FM_DEBUG_PROC_FILE, 0644, NULL,&fm_debug_proc_ops);
+    //if (fm_debug_proc_file) {
+    //    fm_debug_proc_file->proc_fops = &fm_debug_proc_ops;
+    //}
+}
+
+static void remove_fm_debug_proc_file(void)
+{
+    extern struct proc_dir_entry proc_root;
+    //printk("[FM] remove_fm_debug_proc_file\n");
+    remove_proc_entry(FM_DEBUG_PROC_FILE, &proc_root);
+}
+//---Alpha:"create proc mode file to monitor FM enable/disable status"---
+
 static int __init iris_probe(struct platform_device *pdev)
 {
 	struct iris_device *radio;
@@ -5478,6 +5504,10 @@ static int __init iris_probe(struct platform_device *pdev)
 	memcpy(radio->videodev, &iris_viddev_template,
 	  sizeof(iris_viddev_template));
 
+	//+++Alpha:"create proc mode file to monitor FM enable/disable status"+++
+	create_fm_debug_proc_file();
+	//---Alpha:"create proc mode file to monitor FM enable/disable status"---
+
 	for (i = 0; i < IRIS_BUF_MAX; i++) {
 		int kfifo_alloc_rc = 0;
 		spin_lock_init(&radio->buf_lock[i]);
@@ -5507,7 +5537,6 @@ static int __init iris_probe(struct platform_device *pdev)
 	init_completion(&radio->sync_xfr_start);
 	radio->tune_req = 0;
 	radio->prev_trans_rds = 2;
-	radio->is_fm_closing = 0;
 	init_waitqueue_head(&radio->event_queue);
 	init_waitqueue_head(&radio->read_queue);
 
@@ -5553,6 +5582,10 @@ static int iris_remove(struct platform_device *pdev)
 		return -EINVAL;
 	}
 	video_unregister_device(radio->videodev);
+
+	//+++Alpha:"create proc mode file to monitor FM enable/disable status"+++
+	remove_fm_debug_proc_file();
+	//---Alpha:"create proc mode file to monitor FM enable/disable status"---
 
 	for (i = 0; i < IRIS_BUF_MAX; i++)
 		kfifo_free(&radio->data_buf[i]);

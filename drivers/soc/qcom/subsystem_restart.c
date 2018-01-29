@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -29,6 +29,7 @@
 #include <linux/spinlock.h>
 #include <linux/device.h>
 #include <linux/idr.h>
+#include <linux/debugfs.h>
 #include <linux/interrupt.h>
 #include <linux/of_gpio.h>
 #include <linux/cdev.h>
@@ -48,9 +49,9 @@ module_param(disable_restart_work, uint, S_IRUGO | S_IWUSR);
 static int enable_debug;
 module_param(enable_debug, int, S_IRUGO | S_IWUSR);
 
-/* The maximum shutdown timeout is the product of MAX_LOOPS and DELAY_MS. */
-#define SHUTDOWN_ACK_MAX_LOOPS	50
-#define SHUTDOWN_ACK_DELAY_MS	100
+#include "linux/asusdebug.h"/*ASUS-BBSP Save SSR reason+*/
+#include <linux/reboot.h>
+#include <linux/rtc.h>
 
 /**
  * enum p_subsys_state - state of a subsystem (private)
@@ -145,6 +146,7 @@ struct restart_log {
  * @restart_level: restart level (0 - panic, 1 - related, 2 - independent, etc.)
  * @restart_order: order of other devices this devices restarts with
  * @crash_count: number of times the device has crashed
+ * @dentry: debugfs directory for this device
  * @do_ramdump_on_put: ramdump on subsystem_put() if true
  * @err_ready: completion variable to record error ready from subsystem
  * @crashed: indicates if subsystem has crashed
@@ -166,6 +168,9 @@ struct subsys_device {
 	int restart_level;
 	int crash_count;
 	struct subsys_soc_restart_order *restart_order;
+#ifdef CONFIG_DEBUG_FS
+	struct dentry *dentry;
+#endif
 	bool do_ramdump_on_put;
 	struct cdev char_dev;
 	dev_t dev_no;
@@ -301,16 +306,83 @@ static struct device_attribute subsys_attrs[] = {
 	__ATTR_NULL,
 };
 
-struct bus_type subsys_bus_type = {
+static struct bus_type subsys_bus_type = {
 	.name		= "msm_subsys",
 	.dev_attrs	= subsys_attrs,
 };
-EXPORT_SYMBOL(subsys_bus_type);
 
 static DEFINE_IDA(subsys_ida);
 
 static int enable_ramdumps;
 module_param(enable_ramdumps, int, S_IRUGO | S_IWUSR);
+
+/*ASUS-BBSP Skip ramdump or panic in a specific reason+++*/
+#ifndef ASUS_SHIP_BUILD
+static char *ssr_no_dump = NULL;
+module_param(ssr_no_dump, charp, 0644);
+static char *ssr_panic = NULL;
+module_param(ssr_panic, charp, 0644);
+#endif
+/*ASUS-BBSP Skip ramdump or panic in a specific reason---*/
+
+/*ASUS-BBSP Save SSR reason+++*/
+#define MAX_SSR_REASON_LEN (128)
+static char *ssr_reason = NULL;
+
+#if defined(ASUS_ZC550KL8916_PROJECT)
+#define REASON_EXCEPTION_A "0: task Exception detected"
+#define REASON_EXCEPTION_B "##3424*9"
+#define DEFAULT_TURBO_TARGET_COUNT 2
+#define DEFAULT_TURBO_REQUIRE_RESET_TIME 14*24*60*60 //14 days
+static uint32_t modem_exception0_flag = 0;
+static unsigned long first_exception0_time = 0;
+static int get_current_time(unsigned long *now_tm_sec);
+#endif
+
+//ASUS_BSP show_wang  +++ [ZC550KL][SSR][N/A][FIX] allow ssr when update mbn in factory mode
+#define REASON_EXCEPTION_C "qmi_pdc_svc.c"
+#define REASON_EXCEPTION_D "PSD_DEBUG: Modem get"
+#define REASON_EXCEPTION_E "finished, Trigger SSR"
+//ASUS_BSP show_wang  --- [ZC550KL][SSR][N/A][FIX] allow ssr when update mbn in factory mode
+
+module_param(ssr_reason, charp, 0444);
+
+void subsys_save_reason(char *name, char *reason)
+{
+/*ASUS-BBSP Skip ramdump or panic in a specific reason+++*/
+#ifndef ASUS_SHIP_BUILD
+	if (strlen(ssr_panic) > 0) {
+		char *pch = strstr(ssr_panic, "\n");
+		if(pch != NULL)
+			strncpy(pch, "\0", 1);
+		if (strstr(reason, ssr_panic) != NULL)
+			panic("%s", reason);
+	}
+#endif
+/*ASUS-BBSP Skip ramdump or panic in a specific reason---*/
+
+	strlcpy(ssr_reason, reason, MAX_SSR_REASON_LEN);
+	ASUSEvtlog("[SSR]:%s %s\n", name, reason);/*ASUS-BBSP Add SSR inform to ASUSEvtLog+*/
+}
+/*ASUS-BBSP Save SSR reason---*/
+
+/*ASUS-BBSP Skip ramdump or panic in a specific reason+++*/
+int get_ssr_enable_ramdumps(void)
+{
+#ifndef ASUS_SHIP_BUILD
+	if (strlen(ssr_no_dump) > 0) {
+		char *pch = strstr(ssr_no_dump, "\n");
+		if(pch != NULL)
+			strncpy(pch, "\0", 1);
+		if (strstr(ssr_reason, ssr_no_dump) != NULL) {
+			pr_err("[SSR] Skip ramdump for reason = %s, no_dump = %s", ssr_reason, ssr_no_dump);
+			return 0;
+		}
+	}
+#endif
+	return 1;
+}
+/*ASUS-BBSP Skip ramdump or panic in a specific reason---*/
 
 struct workqueue_struct *ssr_wq;
 static struct class *char_class;
@@ -473,7 +545,7 @@ static void notify_each_subsys_device(struct subsys_device **list,
 			send_sysmon_notif(dev);
 
 		notif_data.crashed = subsys_get_crash_status(dev);
-		notif_data.enable_ramdump = is_ramdump_enabled(dev);
+		notif_data.enable_ramdump = (is_ramdump_enabled(dev) && get_ssr_enable_ramdumps());/*ASUS-BBSP Skip ramdump or panic in a specific reason+*/
 		notif_data.no_auth = dev->desc->no_auth;
 		notif_data.pdev = pdev;
 
@@ -510,25 +582,6 @@ static void disable_all_irqs(struct subsys_device *dev)
 		disable_irq(dev->desc->stop_ack_irq);
 }
 
-int wait_for_shutdown_ack(struct subsys_desc *desc)
-{
-	int count;
-
-	if (desc && !desc->shutdown_ack_gpio)
-		return 0;
-
-	for (count = SHUTDOWN_ACK_MAX_LOOPS; count > 0; count--) {
-		if (gpio_get_value(desc->shutdown_ack_gpio))
-			return count;
-		msleep(SHUTDOWN_ACK_DELAY_MS);
-	}
-
-	pr_err("[%s]: Timed out waiting for shutdown ack\n", desc->name);
-
-	return -ETIMEDOUT;
-}
-EXPORT_SYMBOL(wait_for_shutdown_ack);
-
 static int wait_for_err_ready(struct subsys_device *subsys)
 {
 	int ret;
@@ -550,11 +603,10 @@ static void subsystem_shutdown(struct subsys_device *dev, void *data)
 {
 	const char *name = dev->desc->name;
 
-	pr_info("[%s:%d]: Shutting down %s\n",
-			current->comm, current->pid, name);
+	pr_info("[%p]: Shutting down %s\n", current, name);
 	if (dev->desc->shutdown(dev->desc, true) < 0)
-		panic("subsys-restart: [%s:%d]: Failed to shutdown %s!",
-			current->comm, current->pid, name);
+		panic("subsys-restart: [%p]: Failed to shutdown %s!",
+			current, name);
 	dev->crash_count++;
 	subsys_set_state(dev, SUBSYS_OFFLINE);
 	disable_all_irqs(dev);
@@ -565,9 +617,8 @@ static void subsystem_ramdump(struct subsys_device *dev, void *data)
 	const char *name = dev->desc->name;
 
 	if (dev->desc->ramdump)
-		if (dev->desc->ramdump(is_ramdump_enabled(dev), dev->desc) < 0)
-			pr_warn("%s[%s:%d]: Ramdump failed.\n",
-				name, current->comm, current->pid);
+		if (dev->desc->ramdump((is_ramdump_enabled(dev) && get_ssr_enable_ramdumps()), dev->desc) < 0)/*ASUS-BBSP Skip ramdump or panic in a specific reason+*/
+			pr_warn("%s[%p]: Ramdump failed.\n", name, current);
 	dev->do_ramdump_on_put = false;
 }
 
@@ -582,14 +633,13 @@ static void subsystem_powerup(struct subsys_device *dev, void *data)
 	const char *name = dev->desc->name;
 	int ret;
 
-	pr_info("[%s:%d]: Powering up %s\n", current->comm, current->pid, name);
+	pr_info("[%p]: Powering up %s\n", current, name);
 	init_completion(&dev->err_ready);
 
 	if (dev->desc->powerup(dev->desc) < 0) {
 		notify_each_subsys_device(&dev, 1, SUBSYS_POWERUP_FAILURE,
 								NULL);
-		panic("[%s:%d]: Powerup error: %s!",
-			current->comm, current->pid, name);
+		panic("[%p]: Powerup error: %s!", current, name);
 	}
 	enable_all_irqs(dev);
 
@@ -597,8 +647,8 @@ static void subsystem_powerup(struct subsys_device *dev, void *data)
 	if (ret) {
 		notify_each_subsys_device(&dev, 1, SUBSYS_POWERUP_FAILURE,
 								NULL);
-		panic("[%s:%d]: Timed out waiting for error ready: %s!",
-			current->comm, current->pid, name);
+		panic("[%p]: Timed out waiting for error ready: %s!",
+			current, name);
 	}
 	subsys_set_state(dev, SUBSYS_ONLINE);
 	subsys_set_crash_status(dev, false);
@@ -812,26 +862,11 @@ static void subsystem_restart_wq_func(struct work_struct *work)
 		track = &dev->track;
 	}
 
-	/*
-	 * If a system reboot/shutdown is under way, ignore subsystem errors.
-	 * However, print a message so that we know that a subsystem behaved
-	 * unexpectedly here.
-	 */
-	if (system_state == SYSTEM_RESTART
-		|| system_state == SYSTEM_POWER_OFF) {
-		WARN(1, "SSR aborted: %s, system reboot/shutdown is under way\n",
-			desc->name);
-		return;
-	}
-
 	mutex_lock(&track->lock);
 	do_epoch_check(dev);
 
-	if (dev->track.state == SUBSYS_OFFLINE) {
-		mutex_unlock(&track->lock);
-		WARN(1, "SSR aborted: %s subsystem not online\n", desc->name);
-		return;
-	}
+	if (get_ssr_enable_ramdumps())/*ASUS-BBSP Skip ramdump or panic in a specific reason+*/
+	kobject_uevent(&(desc->dev->kobj), KOBJ_OFFLINE);/*ASUS-BBSP Modify for saving ramdump+*/
 
 	/*
 	 * It's necessary to take the registration lock because the subsystem
@@ -840,8 +875,8 @@ static void subsystem_restart_wq_func(struct work_struct *work)
 	 */
 	mutex_lock(&soc_order_reg_lock);
 
-	pr_debug("[%s:%d]: Starting restart sequence for %s\n",
-			current->comm, current->pid, desc->name);
+	pr_debug("[%p]: Starting restart sequence for %s\n", current,
+			desc->name);
 	notify_each_subsys_device(list, count, SUBSYS_BEFORE_SHUTDOWN, NULL);
 	for_each_subsys_device(list, count, NULL, subsystem_shutdown);
 	notify_each_subsys_device(list, count, SUBSYS_AFTER_SHUTDOWN, NULL);
@@ -862,11 +897,14 @@ static void subsystem_restart_wq_func(struct work_struct *work)
 	for_each_subsys_device(list, count, NULL, subsystem_powerup);
 	notify_each_subsys_device(list, count, SUBSYS_AFTER_POWERUP, NULL);
 
-	pr_info("[%s:%d]: Restart sequence for %s completed.\n",
-			current->comm, current->pid, desc->name);
+	pr_info("[%p]: Restart sequence for %s completed.\n",
+			current, desc->name);
 
 	mutex_unlock(&soc_order_reg_lock);
 	mutex_unlock(&track->lock);
+
+	if (get_ssr_enable_ramdumps())/*ASUS-BBSP Skip ramdump or panic in a specific reason+*/
+	kobject_uevent(&(desc->dev->kobj), KOBJ_ONLINE);/*ASUS-BBSP Modify for saving ramdump+*/
 
 	spin_lock_irqsave(&track->s_lock, flags);
 	track->p_state = SUBSYS_NORMAL;
@@ -910,6 +948,71 @@ static void device_restart_work_hdlr(struct work_struct *work)
 	struct subsys_device *dev = container_of(work, struct subsys_device,
 							device_restart_work);
 
+#if defined(ASUS_ZC550KL8916_PROJECT)
+	uint32_t turbo_require_count;
+	uint32_t turbo_require_reset_time;
+	uint32_t turbo_target_count;
+	unsigned long now_time;
+
+	if(modem_exception0_flag)
+	{
+		turbo_require_count = get_rpm_turbo_require_count();
+		turbo_require_reset_time = get_rpm_turbo_require_reset_time();
+		turbo_target_count = get_rpm_turbo_target_count();
+
+		if(first_exception0_time==0 || turbo_require_count==0)
+		{
+			get_current_time(&first_exception0_time);
+		}
+
+		if(turbo_require_reset_time < 5*60)
+		{
+			set_rpm_turbo_require_reset_time(DEFAULT_TURBO_REQUIRE_RESET_TIME);
+			turbo_require_reset_time = DEFAULT_TURBO_REQUIRE_RESET_TIME;
+		}
+
+		if(turbo_target_count==0)
+		{
+			set_rpm_turbo_target_count(DEFAULT_TURBO_TARGET_COUNT);
+			turbo_target_count = DEFAULT_TURBO_TARGET_COUNT;
+		}
+
+		turbo_require_count++;
+		get_current_time(&now_time);
+
+		pr_err("======[SSR]catch Exception 0======\n");
+		pr_err("turbo_require_count = %u\n", turbo_require_count);
+		pr_err("turbo_target_count = %u\n", turbo_target_count);
+		pr_err("turbo_require_reset_time = %u\n", turbo_require_reset_time);
+		pr_err("now_time = %lu\n", now_time);
+		pr_err("first_exception0_time = %lu\n", first_exception0_time);
+
+		if(now_time - first_exception0_time > turbo_require_reset_time)
+		{
+			pr_err("Too long time from first exception0, reset turbo_require_count\n");
+			turbo_require_count = 1;
+			first_exception0_time = now_time;
+		}
+		set_rpm_turbo_require_count(turbo_require_count);
+
+		modem_exception0_flag = 0;
+
+		if(turbo_require_count < turbo_target_count)
+		{ 
+			pr_err("turbo_require_count < turbo_target count,trigger SSR\n");
+			__subsystem_restart_dev(dev);
+			module_put(dev->owner);
+			put_device(&dev->dev);
+			return;
+		}
+
+		set_modem_debug_value(8);
+		msleep(5000);
+		machine_restart(NULL);
+		return;
+	}
+#endif
+
 	notify_each_subsys_device(&dev, 1, SUBSYS_SOC_RESET, NULL);
 	panic("subsys-restart: Resetting the SoC - %s crashed.",
 							dev->desc->name);
@@ -919,6 +1022,7 @@ int subsystem_restart_dev(struct subsys_device *dev)
 {
 	const char *name;
 
+	int restart_level_temp = 0;//ASUS_BSP show_wang [ZC550KL][SSR][N/A][FIX] allow ssr when update mbn in factory mode
 	if (!get_device(&dev->dev))
 		return -ENODEV;
 
@@ -943,25 +1047,78 @@ int subsystem_restart_dev(struct subsys_device *dev)
 	pr_info("Restart sequence requested for %s, restart_level = %s.\n",
 		name, restart_levels[dev->restart_level]);
 
-	if (disable_restart_work == DISABLE_SSR) {
-		pr_warn("subsys-restart: Ignoring restart request for %s.\n",
-									name);
+	if (WARN(disable_restart_work == DISABLE_SSR,
+		"subsys-restart: Ignoring restart request for %s.\n", name)) {
 		return 0;
 	}
 
-	switch (dev->restart_level) {
-
-	case RESET_SUBSYS_COUPLED:
-		__subsystem_restart_dev(dev);
-		break;
-	case RESET_SOC:
-		__pm_stay_awake(&dev->ssr_wlock);
-		schedule_work(&dev->device_restart_work);
-		return 0;
-	default:
-		panic("subsys-restart: Unknown restart level!\n");
-		break;
+//ASUS_BSP Ken_Gan +++ [ZC550KL][SSR][N/A][MODIFY]workaround for Exception 0
+/*
+* If modem crash occurs because of "Exception 0",
+* Here are what we should do:
+* 1.Record crash count.
+* 2.Reboot device directly.
+* */
+//ASUS_BSP show_wang  +++ [ZC550KL][SSR][N/A][FIX] allow ssr when update mbn in factory mode
+	restart_level_temp = dev->restart_level;
+	if ( g_ASUS_bootmode != CHARGER_SHIPPING_MODE &&
+			g_ASUS_bootmode != SHIPPING_MODE ) {
+		if (strstr(ssr_reason, REASON_EXCEPTION_C) != NULL &&
+				strstr(ssr_reason, REASON_EXCEPTION_D) != NULL &&
+				strstr(ssr_reason, REASON_EXCEPTION_E) != NULL) {
+			printk("%s ssr_reason is %s \n", __func__, ssr_reason);
+			restart_level_temp = RESET_SUBSYS_COUPLED;
+		}
 	}
+//ASUS_BSP show_wang  --- [ZC550KL][SSR][N/A][FIX] allow ssr when update mbn in factory mode
+
+#if defined(ASUS_ZC550KL8916_PROJECT)
+	if (strstr(ssr_reason, REASON_EXCEPTION_A) != NULL ||
+			strstr(ssr_reason, REASON_EXCEPTION_B) != NULL)
+	{
+		pr_err("modem ssr check reason\n");
+		//modem_exception0_flag = 1;
+		//__pm_stay_awake(&dev->ssr_wlock);
+		//schedule_work(&dev->device_restart_work);
+		//return 0;
+	}
+#endif
+//ASUS_BSP Ken_Gan --- [ZC550KL][SSR][N/A][MODIFY]workaround for Exception 0
+
+//ASUS_BSP show_wang  +++ [ZC550KL][SSR][N/A][FIX] allow ssr when update mbn in factory mode
+	if ( g_ASUS_bootmode != CHARGER_SHIPPING_MODE &&
+			g_ASUS_bootmode != SHIPPING_MODE ) {
+	switch (restart_level_temp) {
+
+		case RESET_SUBSYS_COUPLED:
+			printk("%s RESET_SUBSYS_COUPLED\n", __func__);
+			__subsystem_restart_dev(dev);
+			break;
+		case RESET_SOC:
+			__pm_stay_awake(&dev->ssr_wlock);
+			schedule_work(&dev->device_restart_work);
+			return 0;
+		default:
+			panic("subsys-restart: Unknown restart level!\n");
+			break;
+		}
+	} else {
+		switch (dev->restart_level) {
+
+		case RESET_SUBSYS_COUPLED:
+			__subsystem_restart_dev(dev);
+			break;
+		case RESET_SOC:
+			__pm_stay_awake(&dev->ssr_wlock);
+			schedule_work(&dev->device_restart_work);
+			return 0;
+		default:
+			panic("subsys-restart: Unknown restart level!\n");
+			break;
+		}
+	}
+//ASUS_BSP show_wang  --- [ZC550KL][SSR][N/A][FIX] allow ssr when update mbn in factory mode
+
 	module_put(dev->owner);
 	put_device(&dev->dev);
 
@@ -1047,6 +1204,285 @@ void notify_proxy_unvote(struct device *device)
 	if (dev)
 		notify_each_subsys_device(&dev, 1, SUBSYS_PROXY_UNVOTE, NULL);
 }
+
+#ifdef CONFIG_DEBUG_FS
+static ssize_t subsys_debugfs_read(struct file *filp, char __user *ubuf,
+		size_t cnt, loff_t *ppos)
+{
+	int r;
+	char buf[40];
+	struct subsys_device *subsys = filp->private_data;
+
+	r = snprintf(buf, sizeof(buf), "%d\n", subsys->count);
+	return simple_read_from_buffer(ubuf, cnt, ppos, buf, r);
+}
+
+static ssize_t subsys_debugfs_write(struct file *filp,
+		const char __user *ubuf, size_t cnt, loff_t *ppos)
+{
+	struct subsys_device *subsys = filp->private_data;
+	char buf[10];
+	char *cmp;
+
+	cnt = min(cnt, sizeof(buf) - 1);
+	if (copy_from_user(&buf, ubuf, cnt))
+		return -EFAULT;
+	buf[cnt] = '\0';
+	cmp = strstrip(buf);
+
+	if (!strcmp(cmp, "restart")) {
+		if (subsystem_restart_dev(subsys))
+			return -EIO;
+	} else if (!strcmp(cmp, "get")) {
+		if (subsystem_get(subsys->desc->name))
+			return -EIO;
+	} else if (!strcmp(cmp, "put")) {
+		subsystem_put(subsys);
+	} else {
+		return -EINVAL;
+	}
+
+	return cnt;
+}
+
+static const struct file_operations subsys_debugfs_fops = {
+	.open	= simple_open,
+	.read	= subsys_debugfs_read,
+	.write	= subsys_debugfs_write,
+};
+
+//ASUS_BSP +++ jeff_gu [ZC550KL][SSR][N/A][MODIFY]workaround for Exception 0
+#if defined(ASUS_ZC550KL8916_PROJECT)
+static ssize_t modem_crash_count_debugfs_read(struct file *filp, char __user *ubuf,
+		size_t cnt, loff_t *ppos)
+{
+	int r;
+	char buf[40];
+	uint32_t crash_count = get_modem_debug_value();
+	r = snprintf(buf, sizeof(buf), "%u\n", crash_count);
+	return simple_read_from_buffer(ubuf, cnt, ppos, buf, r);
+}
+
+static ssize_t modem_crash_count_debugfs_write(struct file *filp,
+		const char __user *ubuf, size_t cnt, loff_t *ppos)
+{
+	uint32_t crash_count;
+	char buf[10];
+
+	cnt = min(cnt, sizeof(buf) - 1);
+	if (copy_from_user(&buf, ubuf, cnt))
+		return -EFAULT;
+
+	if (sscanf(buf, "%u", &crash_count)!= 1)
+		return -EINVAL;
+
+	pr_err("debugfs set modem_crash_count = %u\n", crash_count);
+	set_modem_debug_value(crash_count);
+
+	return cnt;
+}
+
+static const struct file_operations modem_crash_count_debugfs_fops = {
+	.open	= simple_open,
+	.read	= modem_crash_count_debugfs_read,
+	.write	= modem_crash_count_debugfs_write,
+};
+
+
+static ssize_t rpm_turbo_require_count_debugfs_read(struct file *filp, char __user *ubuf,
+		size_t cnt, loff_t *ppos)
+{
+	int r;
+	char buf[40];
+	uint32_t require_count = get_rpm_turbo_require_count();
+	r = snprintf(buf, sizeof(buf), "%u\n", require_count);
+	return simple_read_from_buffer(ubuf, cnt, ppos, buf, r);
+}
+
+static ssize_t rpm_turbo_require_count_debugfs_write(struct file *filp,
+		const char __user *ubuf, size_t cnt, loff_t *ppos)
+{
+	uint32_t require_count;
+	char buf[10];
+
+	cnt = min(cnt, sizeof(buf) - 1);
+	if (copy_from_user(&buf, ubuf, cnt))
+		return -EFAULT;
+
+	if (sscanf(buf, "%u", &require_count)!= 1)
+		return -EINVAL;
+
+	pr_err("debugfs set_rpm_turbo_require_count = %u\n", require_count);
+	set_rpm_turbo_require_count(require_count);
+
+	return cnt;
+}
+
+static const struct file_operations rpm_turbo_require_count_debugfs_fops = {
+	.open	= simple_open,
+	.read	= rpm_turbo_require_count_debugfs_read,
+	.write	= rpm_turbo_require_count_debugfs_write,
+};
+
+
+static ssize_t rpm_turbo_require_reset_time_debugfs_read(struct file *filp, char __user *ubuf,
+		size_t cnt, loff_t *ppos)
+{
+	int r;
+	char buf[40];
+	uint32_t reset_time = get_rpm_turbo_require_reset_time();
+	r = snprintf(buf, sizeof(buf), "%u\n", reset_time);
+	return simple_read_from_buffer(ubuf, cnt, ppos, buf, r);
+}
+
+static ssize_t rpm_turbo_require_reset_time_debugfs_write(struct file *filp,
+		const char __user *ubuf, size_t cnt, loff_t *ppos)
+{
+	uint32_t reset_time;
+	char buf[10];
+
+	cnt = min(cnt, sizeof(buf) - 1);
+	if (copy_from_user(&buf, ubuf, cnt))
+		return -EFAULT;
+
+	if (sscanf(buf, "%u", &reset_time)!= 1)
+		return -EINVAL;
+
+	pr_err("debugfs set_rpm_turbo_require_reset_time = %u\n", reset_time);
+	set_rpm_turbo_require_reset_time(reset_time);
+
+	return cnt;
+}
+
+static const struct file_operations rpm_turbo_require_reset_time_debugfs_fops = {
+	.open	= simple_open,
+	.read	= rpm_turbo_require_reset_time_debugfs_read,
+	.write	= rpm_turbo_require_reset_time_debugfs_write,
+};
+
+static ssize_t rpm_turbo_target_count_debugfs_read(struct file *filp, char __user *ubuf,
+		size_t cnt, loff_t *ppos)
+{
+	int r;
+	char buf[40];
+	uint32_t target_count = get_rpm_turbo_target_count();
+	r = snprintf(buf, sizeof(buf), "%u\n", target_count);
+	return simple_read_from_buffer(ubuf, cnt, ppos, buf, r);
+}
+
+static ssize_t rpm_turbo_target_count_debugfs_write(struct file *filp,
+		const char __user *ubuf, size_t cnt, loff_t *ppos)
+{
+	uint32_t target_count;
+	char buf[10];
+
+	cnt = min(cnt, sizeof(buf) - 1);
+	if (copy_from_user(&buf, ubuf, cnt))
+		return -EFAULT;
+
+	if (sscanf(buf, "%u", &target_count)!= 1)
+		return -EINVAL;
+
+	pr_err("debugfs set_rpm_turbo_target_count = %u\n", target_count);
+	set_rpm_turbo_target_count(target_count);
+
+	return cnt;
+}
+
+static const struct file_operations rpm_turbo_target_count_debugfs_fops = {
+	.open	= simple_open,
+	.read	= rpm_turbo_target_count_debugfs_read,
+	.write	= rpm_turbo_target_count_debugfs_write,
+};
+
+static int get_current_time(unsigned long *now_tm_sec)
+{
+	struct rtc_time tm;
+	struct rtc_device *rtc;
+	int rc;
+
+	rtc = rtc_class_open(CONFIG_RTC_HCTOSYS_DEVICE);
+	if (rtc == NULL) {
+		pr_err("%s: unable to open rtc device (%s)\n",
+			__FILE__, CONFIG_RTC_HCTOSYS_DEVICE);
+		return -EINVAL;
+	}
+
+	rc = rtc_read_time(rtc, &tm);
+	if (rc) {
+		pr_err("Error reading rtc device (%s) : %d\n",
+			CONFIG_RTC_HCTOSYS_DEVICE, rc);
+		goto close_time;
+	}
+
+	rc = rtc_valid_tm(&tm);
+	if (rc) {
+		pr_err("Invalid RTC time (%s): %d\n",
+			CONFIG_RTC_HCTOSYS_DEVICE, rc);
+		goto close_time;
+	}
+	rtc_tm_to_time(&tm, now_tm_sec);
+
+close_time:
+	rtc_class_close(rtc);
+	return rc;
+}
+#endif
+//ASUS_BSP --- jeff_gu [ZC550KL][SSR][N/A][MODIFY]workaround for Exception 0
+
+static struct dentry *subsys_base_dir;
+
+static int __init subsys_debugfs_init(void)
+{
+	subsys_base_dir = debugfs_create_dir("msm_subsys", NULL);
+	//ASUS_BSP +++ jeff_gu [ZC550KL][SSR][N/A][MODIFY]workaround for Exception 0
+#if defined(ASUS_ZC550KL8916_PROJECT)
+	if(subsys_base_dir)
+	{
+		debugfs_create_file("modem_crash_count",
+				S_IRUSR|S_IRGRP|S_IWUSR, subsys_base_dir, NULL,
+				&modem_crash_count_debugfs_fops);
+		debugfs_create_file("rpm_turbo_require_count",
+				S_IRUSR|S_IRGRP|S_IWUSR, subsys_base_dir, NULL,
+				&rpm_turbo_require_count_debugfs_fops);
+		debugfs_create_file("rpm_turbo_require_reset_time",
+				S_IRUSR|S_IRGRP|S_IWUSR, subsys_base_dir, NULL,
+				&rpm_turbo_require_reset_time_debugfs_fops);
+		debugfs_create_file("rpm_turbo_target_count",
+				S_IRUSR|S_IRGRP|S_IWUSR, subsys_base_dir, NULL,
+				&rpm_turbo_target_count_debugfs_fops);
+	}
+#endif
+	//ASUS_BSP --- jeff_gu [ZC550KL][SSR][N/A][MODIFY]workaround for Exception 0
+	return !subsys_base_dir ? -ENOMEM : 0;
+}
+
+static void subsys_debugfs_exit(void)
+{
+	debugfs_remove_recursive(subsys_base_dir);
+}
+
+static int subsys_debugfs_add(struct subsys_device *subsys)
+{
+	if (!subsys_base_dir)
+		return -ENOMEM;
+
+	subsys->dentry = debugfs_create_file(subsys->desc->name,
+				S_IRUGO | S_IWUSR, subsys_base_dir,
+				subsys, &subsys_debugfs_fops);
+	return !subsys->dentry ? -ENOMEM : 0;
+}
+
+static void subsys_debugfs_remove(struct subsys_device *subsys)
+{
+	debugfs_remove(subsys->dentry);
+}
+#else
+static int __init subsys_debugfs_init(void) { return 0; };
+static void subsys_debugfs_exit(void) { }
+static int subsys_debugfs_add(struct subsys_device *subsys) { return 0; }
+static void subsys_debugfs_remove(struct subsys_device *subsys) { }
+#endif
 
 static int subsys_device_open(struct inode *inode, struct file *file)
 {
@@ -1332,11 +1768,6 @@ static int subsys_parse_devicetree(struct subsys_desc *desc)
 	if (ret && ret != -ENOENT)
 		return ret;
 
-	ret = __get_gpio(desc, "qcom,gpio-shutdown-ack",
-			&desc->shutdown_ack_gpio);
-	if (ret && ret != -ENOENT)
-		return ret;
-
 	ret = platform_get_irq(pdev, 0);
 	if (ret > 0)
 		desc->wdog_bite_irq = ret;
@@ -1459,6 +1890,10 @@ struct subsys_device *subsys_register(struct subsys_desc *desc)
 
 	mutex_init(&subsys->track.lock);
 
+	ret = subsys_debugfs_add(subsys);
+	if (ret)
+		goto err_debugfs;
+
 	ret = device_register(&subsys->dev);
 	if (ret) {
 		device_unregister(&subsys->dev);
@@ -1510,6 +1945,8 @@ err_setup_irqs:
 	if (ofnode)
 		subsys_remove_restart_order(ofnode);
 err_register:
+	subsys_debugfs_remove(subsys);
+err_debugfs:
 	mutex_destroy(&subsys->track.lock);
 	ida_simple_remove(&subsys_ida, subsys->id);
 err_ida:
@@ -1542,6 +1979,7 @@ void subsys_unregister(struct subsys_device *subsys)
 		WARN_ON(subsys->count);
 		device_unregister(&subsys->dev);
 		mutex_unlock(&subsys->track.lock);
+		subsys_debugfs_remove(subsys);
 		subsys_char_device_remove(subsys);
 		sysmon_notifier_unregister(subsys->desc);
 		put_device(&subsys->dev);
@@ -1579,6 +2017,9 @@ static int __init subsys_restart_init(void)
 	ret = bus_register(&subsys_bus_type);
 	if (ret)
 		goto err_bus;
+	ret = subsys_debugfs_init();
+	if (ret)
+		goto err_debugfs;
 
 	char_class = class_create(THIS_MODULE, "subsys");
 	if (IS_ERR(char_class)) {
@@ -1592,11 +2033,22 @@ static int __init subsys_restart_init(void)
 	if (ret)
 		goto err_soc;
 
+	ssr_reason = kzalloc(sizeof(char) * MAX_SSR_REASON_LEN, GFP_KERNEL);/*ASUS-BBSP Save SSR reason+*/
+
+/*ASUS-BBSP Skip ramdump or panic in a specific reason+++*/
+#ifndef ASUS_SHIP_BUILD
+	ssr_panic = kzalloc(sizeof(char) * MAX_SSR_REASON_LEN, GFP_KERNEL);
+	ssr_no_dump = kzalloc(sizeof(char) * MAX_SSR_REASON_LEN, GFP_KERNEL);
+#endif
+/*ASUS-BBSP Skip ramdump or panic in a specific reason---*/
+
 	return 0;
 
 err_soc:
 	class_destroy(char_class);
 err_class:
+	subsys_debugfs_exit();
+err_debugfs:
 	bus_unregister(&subsys_bus_type);
 err_bus:
 	destroy_workqueue(ssr_wq);

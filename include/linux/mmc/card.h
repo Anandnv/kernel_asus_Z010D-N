@@ -14,6 +14,9 @@
 #include <linux/mmc/core.h>
 #include <linux/mod_devicetable.h>
 #include <linux/notifier.h>
+//ASUS_BSP +++ Gavin_Chang "mmc cmd statistics"
+//#include <linux/android_alarm.h>	//Marked at Android L
+//ASUS_BSP --- Gavin_Chang "mmc cmd statistics"
 
 struct mmc_cid {
 	unsigned int		manfid;
@@ -84,7 +87,7 @@ struct mmc_ext_csd {
 	bool			hpi;			/* HPI support bit */
 	unsigned int		hpi_cmd;		/* cmd used as HPI */
 	bool			bkops;		/* background support bit */
-	u8			bkops_en;	/* background enable bits */
+	bool			bkops_en;	/* background enable bit */
 	unsigned int            data_sector_size;       /* 512 bytes or 4KB */
 	unsigned int            data_tag_unit_size;     /* DATA TAG UNIT size */
 	unsigned int		boot_ro_lock;		/* ro lock support */
@@ -107,7 +110,9 @@ struct mmc_ext_csd {
 	u8			raw_trim_mult;		/* 232 */
 	u8			raw_bkops_status;	/* 246 */
 	u8			raw_sectors[4];		/* 212 - 4 bytes */
-
+	u8          raw_fw_version[8];  /* 254 - 8 bytes */	//ASUS_BSP Deeo : add for fw version +++
+	u8          device_life_time[2];/* 268  269*/       //ASUS_BSP Lei_guo: add for DEVICE_LIFE_TIME_EST_TYP of eMMC
+	u8			pre_device_eol;
 	unsigned int            feature_support;
 #define MMC_DISCARD_FEATURE	BIT(0)                  /* CMD38 feature */
 };
@@ -312,6 +317,48 @@ struct mmc_bkops_info {
 #define BKOPS_SIZE_PERCENTAGE_TO_QUEUE_DELAYED_WORK 1 /* 1% */
 };
 
+//ASUS_BSP +++ Gavin_Chang "mmc cmd statistics"
+struct mmc_cmd_stats {
+	spinlock_t		lock;
+	bool			print_stats;
+	bool 			enabled;
+	unsigned int	cmd_cnt[60];
+	unsigned long long	rdata_sz;
+	unsigned long long	wdata_sz;
+	unsigned int	do_data_tag_cnt;
+	unsigned int	do_rel_wr_cnt;
+	unsigned int	flush_cache_cnt;
+	unsigned int	cache_on_cnt;
+	unsigned int	cache_off_cnt;
+	unsigned int	pwr_on_cnt;
+	unsigned int	pwr_off_short_cnt;
+	unsigned int	pwr_off_long_cnt;
+	unsigned int	bkops_start_cnt;
+	unsigned int	hpi_cnt;
+	unsigned int	sanitize_cnt;
+	unsigned int	trim_cnt;
+	unsigned int	erase_cnt;
+	unsigned int	discard_cnt;
+	unsigned int	boot_wp_cnt;
+	unsigned int	part_cfg_cnt;
+	unsigned int	pwr_cls_cnt;
+	unsigned int	bus_width_cnt;
+	unsigned int	hs_timing_cnt;
+	unsigned int	erase_grp_def_cnt;
+	unsigned int	hpi_mgmt_cnt;
+	unsigned int	exp_events_ctrl_cnt;
+	unsigned int	cmd38_trim_cnt;
+	unsigned int	cmd38_erase_cnt;
+	unsigned int	cmd38_sectrim1_cnt;
+	unsigned int	cmd38_secerase_cnt;
+	unsigned int	cmd38_sectrim2_cnt;
+	unsigned int	bkops_en_cnt;
+	//struct alarm	mmc_alarm;
+	struct delayed_work	alarm_work;
+	struct delayed_work	test_work;
+};
+//ASUS_BSP --- Gavin_Chang "mmc cmd statistics"
+
 /*
  * MMC device
  */
@@ -396,27 +443,16 @@ struct mmc_card {
 
 	struct device_attribute rpm_attrib;
 	unsigned int		idle_timeout;
+//ASUS_BSP +++ Gavin_Chang "add eMMC total size for AMAX"
+	char                mmc_total_size[10];
+//ASUS_BSP --- Gavin_Chang "add eMMC total size for AMAX"
+//ASUS_BSP +++ Gavin_Chang "mmc cmd statistics"
+	struct mmc_cmd_stats *cmd_stats;
+//ASUS_BSP --- Gavin_Chang "mmc cmd statistics"
 	struct notifier_block        reboot_notify;
 	bool issue_long_pon;
 	u8 *cached_ext_csd;
 };
-
-/*
- * mmc_csd registers get/set/clr helpers
- */
-#define mmc_card_get_bkops_en_manual(card) ((card->ext_csd.bkops_en) &\
-					EXT_CSD_BKOPS_EN_MANUAL_EN)
-#define mmc_card_set_bkops_en_manual(card) ((card->ext_csd.bkops_en) |= \
-					EXT_CSD_BKOPS_EN_MANUAL_EN)
-#define mmc_card_clr_bkops_en_manual(card) ((card->ext_csd.bkops_en) &= \
-					~EXT_CSD_BKOPS_EN_MANUAL_EN)
-
-#define mmc_card_get_bkops_en_auto(card) ((card->ext_csd.bkops_en) & \
-					EXT_CSD_BKOPS_EN_AUTO_EN)
-#define mmc_card_set_bkops_en_auto(card) ((card->ext_csd.bkops_en) |= \
-					EXT_CSD_BKOPS_EN_AUTO_EN)
-#define mmc_card_clr_bkops_en_auto(card) ((card->ext_csd.bkops_en) &= \
-					~EXT_CSD_BKOPS_EN_AUTO_EN)
 
 /*
  * This function fill contents in mmc_part.

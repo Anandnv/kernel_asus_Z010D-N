@@ -196,6 +196,7 @@ static int ecryptfs_mmap(struct file *file, struct vm_area_struct *vma)
 	return generic_file_mmap(file, vma);
 }
 
+
 /**
  * ecryptfs_open
  * @inode: inode speciying file to open

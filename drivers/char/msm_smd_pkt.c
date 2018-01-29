@@ -359,7 +359,6 @@ static long smd_pkt_ioctl(struct file *file, unsigned int cmd,
 {
 	int ret;
 	struct smd_pkt_dev *smd_pkt_devp;
-	uint32_t val;
 
 	smd_pkt_devp = file->private_data;
 	if (!smd_pkt_devp)
@@ -373,19 +372,20 @@ static long smd_pkt_ioctl(struct file *file, unsigned int cmd,
 		ret = smd_tiocmget(smd_pkt_devp->ch);
 		break;
 	case TIOCMSET:
-		ret = get_user(val, (uint32_t *)arg);
-		if (ret) {
-			pr_err("Error getting TIOCMSET value\n");
-			mutex_unlock(&smd_pkt_devp->ch_lock);
-			return ret;
-		}
-		D_STATUS("%s TIOCSET command on smd_pkt_dev id:%d arg[0x%x]\n",
-			 __func__, smd_pkt_devp->i, val);
-		ret = smd_tiocmset(smd_pkt_devp->ch, val, ~val);
+		D_STATUS("%s TIOCSET command on smd_pkt_dev id:%d\n",
+			 __func__, smd_pkt_devp->i);
+		ret = smd_tiocmset(smd_pkt_devp->ch, arg, ~arg);
 		break;
 	case SMD_PKT_IOCTL_BLOCKING_WRITE:
 		ret = get_user(smd_pkt_devp->blocking_write, (int *)arg);
 		break;
+//ASUS_BSP Ken_Gan +++ [ZC550KL][SSR][N/A][Modify]fix modem reset notification ignored because of wrong errno
+	case SMD_PKT_IOCTL_RESET_QUERY:
+		pr_err("%s SMD_PKT_IOCTL_RESET_QUERY,has_reset:%d\n",
+			__func__, smd_pkt_devp->has_reset);
+		ret = put_user(smd_pkt_devp->has_reset, (int *)arg);
+		break;
+//ASUS_BSP Ken_Gan --- [ZC550KL][SSR][N/A][Modify]fix modem reset notification ignored because of wrong errno
 	default:
 		pr_err_ratelimited("%s: Unrecognized ioctl command %d\n",
 			__func__, cmd);

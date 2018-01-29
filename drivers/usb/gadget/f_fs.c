@@ -932,6 +932,17 @@ first_try:
 					pr_err("less data(%zd) recieved than intended length(%zu)\n",
 								ret, len);
 				if (ret > len) {
+					// ASUS BSP +++ Add log for monitoring endpoint buffer overflow
+					#if defined(CONFIG_ASUS_EVT_LOG)
+						ASUSEvtlog("[USB] FFS OVERFLOW (%zd %zu)\n",ret , len);
+						if (ep->ep)
+							ASUSEvtlog("[USB] FFS EP (%s %d)",ep->ep->name, ep->ep->address);
+					#endif
+					pr_err("[USB] FFS OVERFLOW (%zd %zu)\n",ret , len);
+					if (ep->ep)
+							pr_err("[USB] FFS EP (%s %d)",ep->ep->name, ep->ep->address);
+					dump_stack();
+					// ASUS BSP --- Add log for monitoring endpoint buffer overflow
 					ret = -EOVERFLOW;
 					pr_err("More data(%zd) recieved than intended length(%zu)\n",
 								ret, len);
@@ -1422,14 +1433,14 @@ static void ffs_data_clear(struct ffs_data *ffs)
 {
 	ENTER();
 
-	pr_debug("%s: ffs->gadget= %pK, ffs->flags= %lu\n", __func__,
+	pr_debug("%s: ffs->gadget= %p, ffs->flags= %lu\n", __func__,
 						ffs->gadget, ffs->flags);
 	if (test_and_clear_bit(FFS_FL_CALL_CLOSED_CALLBACK, &ffs->flags))
 		functionfs_closed_callback(ffs);
 
 	/* Dump ffs->gadget and ffs->flags */
 	if (ffs->gadget)
-		pr_err("%s: ffs->gadget= %pK, ffs->flags= %lu\n", __func__,
+		pr_err("%s: ffs->gadget= %p, ffs->flags= %lu\n", __func__,
 						ffs->gadget, ffs->flags);
 	BUG_ON(ffs->gadget);
 

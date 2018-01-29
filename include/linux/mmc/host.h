@@ -405,8 +405,6 @@ struct mmc_host {
 
 	struct dentry		*debugfs_root;
 
-	bool			err_occurred;
-
 	struct mmc_async_req	*areq;		/* active async req */
 	struct mmc_context_info	context_info;	/* async synchronization info */
 
@@ -438,6 +436,8 @@ struct mmc_host {
 	} perf;
 	bool perf_enable;
 #endif
+       unsigned int cd_delay;  //ASUS_BSP +++ Allen_Zhuang "card detect config"
+       unsigned int sd_status; //ASUS_BSP +++ Allen_Zhuang "sd status for ATD"
 	struct {
 		unsigned long	busy_time_us;
 		unsigned long	window_time;

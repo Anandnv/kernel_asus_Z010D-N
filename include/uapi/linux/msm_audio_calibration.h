@@ -44,6 +44,28 @@
 							217, void *)
 #define AUDIO_SET_RTAC_AFE_CAL		_IOWR(CAL_IOCTL_MAGIC, \
 							218, void *)
+
+/* ASUS_BSP Paul +++ */
+#define AUDIO_SET_CODEC_REG			_IOWR(CAL_IOCTL_MAGIC, \
+							219, void *)
+#define AUDIO_GET_CODEC_REG			_IOWR(CAL_IOCTL_MAGIC, \
+							220, void *)
+#define AUDIO_SET_RINGTONE_PROFILE	_IOW(CAL_IOCTL_MAGIC, \
+							221, void *)
+#define AUDIO_GET_RINGTONE_PROFILE	_IOR(CAL_IOCTL_MAGIC, \
+							222, void *)
+#define AUDIO_SET_SKYPE_STATE			_IOW(CAL_IOCTL_MAGIC, \
+							223, void *)
+#define AUDIO_GET_SKYPE_STATE			_IOR(CAL_IOCTL_MAGIC, \
+							224, void *)
+/* ASUS_BSP Paul --- */
+//Sharon++
+#define AUDIO_SET_MODE					_IOWR(CAL_IOCTL_MAGIC, \
+							225, void *)
+
+extern int get_audiomode(void);
+//Sharon--
+
 enum {
 	CVP_VOC_RX_TOPOLOGY_CAL_TYPE = 0,
 	CVP_VOC_TX_TOPOLOGY_CAL_TYPE,
@@ -90,12 +112,17 @@ enum {
 	AUDIO_CORE_METAINFO_CAL_TYPE,
 	SRS_TRUMEDIA_CAL_TYPE,
 
-	CORE_CUSTOM_TOPOLOGIES_CAL_TYPE,
+	/* ASUS_BSP Paul +++ */
+	CODEC_REG_TYPE,
+	RINGTONE_PROFILE_TYPE,
+	SKYPE_STATE_TYPE,
+	/* ASUS_BSP Paul --- */
+	//Sharon++
+	SET_MODE_TYPE,
+	//Sharon--
+
 	MAX_CAL_TYPES,
 };
-
-#define AFE_FB_SPKR_PROT_TH_VI_CAL_TYPE AFE_FB_SPKR_PROT_TH_VI_CAL_TYPE
-#define AFE_FB_SPKR_PROT_EX_VI_CAL_TYPE AFE_FB_SPKR_PROT_EX_VI_CAL_TYPE
 
 enum {
 	VERSION_0_0,
@@ -272,46 +299,9 @@ struct audio_cal_info_spk_prot_cfg {
 	int32_t		r0[SP_V2_NUM_MAX_SPKRS];
 	int32_t		t0[SP_V2_NUM_MAX_SPKRS];
 	uint32_t	quick_calib_flag;
-	uint32_t	mode;
-	/*
-	 * 0 - Start spk prot
-	 * 1 - Start calib
-	 * 2 - Disable spk prot
-	 */
-};
-
-struct audio_cal_info_sp_th_vi_ftm_cfg {
-	uint32_t	wait_time[SP_V2_NUM_MAX_SPKRS];
-	uint32_t	ftm_time[SP_V2_NUM_MAX_SPKRS];
-	uint32_t	mode;
-	/*
-	 * 0 - normal running mode
-	 * 1 - Calibration
-	 * 2 - FTM mode
-	 */
-};
-
-struct audio_cal_info_sp_ex_vi_ftm_cfg {
-	uint32_t	wait_time[SP_V2_NUM_MAX_SPKRS];
-	uint32_t	ftm_time[SP_V2_NUM_MAX_SPKRS];
-	uint32_t	mode;
-	/*
-	 * 0 - normal running mode
-	 * 2 - FTM mode
-	 */
-};
-
-struct audio_cal_info_sp_ex_vi_param {
-	int32_t		freq_q20[SP_V2_NUM_MAX_SPKRS];
-	int32_t		resis_q24[SP_V2_NUM_MAX_SPKRS];
-	int32_t		qmct_q24[SP_V2_NUM_MAX_SPKRS];
-	int32_t		status[SP_V2_NUM_MAX_SPKRS];
-};
-
-struct audio_cal_info_sp_th_vi_param {
-	int32_t		r_dc_q24[SP_V2_NUM_MAX_SPKRS];
-	int32_t		temp_q22[SP_V2_NUM_MAX_SPKRS];
-	int32_t		status[SP_V2_NUM_MAX_SPKRS];
+	uint32_t	mode; /*0 - Start spk prot
+	1 - Start calib
+	2 - Disable spk prot*/
 };
 
 struct audio_cal_info_msm_spk_prot_status {
@@ -508,27 +498,6 @@ struct audio_cal_fb_spk_prot_cfg {
 	struct audio_cal_type_fb_spk_prot_cfg	cal_type;
 };
 
-struct audio_cal_type_sp_th_vi_ftm_cfg {
-	struct audio_cal_type_header		cal_hdr;
-	struct audio_cal_data			cal_data;
-	struct audio_cal_info_sp_th_vi_ftm_cfg	cal_info;
-};
-
-struct audio_cal_sp_th_vi_ftm_cfg {
-	struct audio_cal_header			hdr;
-	struct audio_cal_type_sp_th_vi_ftm_cfg	cal_type;
-};
-
-struct audio_cal_type_sp_ex_vi_ftm_cfg {
-	struct audio_cal_type_header		cal_hdr;
-	struct audio_cal_data			cal_data;
-	struct audio_cal_info_sp_ex_vi_ftm_cfg	cal_info;
-};
-
-struct audio_cal_sp_ex_vi_ftm_cfg {
-	struct audio_cal_header			hdr;
-	struct audio_cal_type_sp_ex_vi_ftm_cfg	cal_type;
-};
 struct audio_cal_type_hw_delay {
 	struct audio_cal_type_header	cal_hdr;
 	struct audio_cal_data		cal_data;
@@ -640,24 +609,4 @@ struct audio_cal_fb_spk_prot_status {
 	struct audio_cal_type_fb_spk_prot_status	cal_type;
 };
 
-struct audio_cal_type_sp_th_vi_param {
-	struct audio_cal_type_header			cal_hdr;
-	struct audio_cal_data				cal_data;
-	struct audio_cal_info_sp_th_vi_param		cal_info;
-};
-
-struct audio_cal_sp_th_vi_param {
-	struct audio_cal_header				hdr;
-	struct audio_cal_type_sp_th_vi_param		cal_type;
-};
-struct audio_cal_type_sp_ex_vi_param {
-	struct audio_cal_type_header			cal_hdr;
-	struct audio_cal_data				cal_data;
-	struct audio_cal_info_sp_ex_vi_param		cal_info;
-};
-
-struct audio_cal_sp_ex_vi_param {
-	struct audio_cal_header				hdr;
-	struct audio_cal_type_sp_ex_vi_param		cal_type;
-};
 #endif /* _UAPI_MSM_AUDIO_CALIBRATION_H */

@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -633,6 +633,9 @@ int mdss_dsi_clk_div_config(struct mdss_panel_info *panel_info,
 	if (ctrl_pdata->refresh_clk_rate || (frame_rate !=
 	     panel_info->mipi.frame_rate) ||
 	    (!panel_info->clk_rate)) {
+		h_period += panel_info->lcdc.xres_pad;
+		v_period += panel_info->lcdc.yres_pad;
+
 		if (lanes > 0) {
 			panel_info->clk_rate =
 			((h_period * v_period *
@@ -865,9 +868,19 @@ error:
 
 static int mdss_dsi_link_clk_set_rate(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 {
-	u32 esc_clk_rate = 19200000;
+#ifndef ASUS_ZC550KL_PROJECT
+    u32 esc_clk_rate;
 	int rc = 0;
 
+    if(g_asus_lcdID == ZE500KL_LCD_AUO)
+        esc_clk_rate = 19200000;
+    else
+        esc_clk_rate = 9600000;
+#else
+
+	u32 esc_clk_rate = 19200000;
+	int rc = 0;
+#endif
 	if (!ctrl_pdata) {
 		pr_err("%s: Invalid input data\n", __func__);
 		return -EINVAL;
@@ -1362,7 +1375,7 @@ static int mdss_dsi_core_power_ctrl(struct mdss_dsi_ctrl_pdata *ctrl,
 		 * Phy and controller setup is needed if coming out of idle
 		 * power collapse with clamps enabled.
 		 */
-		if (ctrl->mmss_clamp) {
+        if (ctrl->mmss_clamp || !pdata->panel_info.cont_splash_enabled) {
 			mdss_dsi_phy_init(ctrl);
 			mdss_dsi_ctrl_setup(ctrl);
 		}

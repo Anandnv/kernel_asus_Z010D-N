@@ -1,4 +1,4 @@
-/* Copyright (c) 2008-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2008-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -24,7 +24,14 @@ struct panel_id {
 	u16 id;
 	u16 type;
 };
-
+#ifndef ASUS_ZC550KL_PROJECT
+//ASUS_BSP: Louis ++
+struct panel_list {
+	char name[16];
+	uint32_t lcd_id;
+};
+//ASUS_BSP: Louis --
+#endif
 #define DEFAULT_FRAME_RATE	60
 #define DEFAULT_ROTATOR_FRAME_RATE 120
 #define MDSS_DSI_RST_SEQ_LEN	10
@@ -227,10 +234,6 @@ struct lcd_panel_info {
 	u32 border_clr;
 	u32 underflow_clr;
 	u32 hsync_skew;
-	u32 border_top;
-	u32 border_bottom;
-	u32 border_left;
-	u32 border_right;
 	/* Pad width */
 	u32 xres_pad;
 	/* Pad height */
@@ -470,7 +473,6 @@ struct mdss_panel_debugfs_info {
 	u32 xres;
 	u32 yres;
 	struct lcd_panel_info lcdc;
-	struct dentry *parent;
 	u32 override_flag;
 	char frame_rate;
 	struct mdss_panel_debugfs_info *next;
@@ -541,9 +543,7 @@ static inline int mdss_panel_get_vtotal(struct mdss_panel_info *pinfo)
 {
 	return pinfo->yres + pinfo->lcdc.v_back_porch +
 			pinfo->lcdc.v_front_porch +
-			pinfo->lcdc.v_pulse_width+
-			pinfo->lcdc.border_top +
-			pinfo->lcdc.border_bottom;
+			pinfo->lcdc.v_pulse_width;
 }
 
 /*
@@ -559,11 +559,10 @@ static inline int mdss_panel_get_vtotal(struct mdss_panel_info *pinfo)
 static inline int mdss_panel_get_htotal(struct mdss_panel_info *pinfo, bool
 		consider_fbc)
 {
-	int adj_xres = pinfo->xres + pinfo->lcdc.border_left +
-				pinfo->lcdc.border_right;
+	int adj_xres = pinfo->xres;
 
 	if (consider_fbc && pinfo->fbc.enabled)
-		adj_xres = mult_frac(adj_xres,
+		adj_xres = mult_frac(pinfo->xres,
 				pinfo->fbc.target_bpp, pinfo->bpp);
 
 	return adj_xres + pinfo->lcdc.h_back_porch +

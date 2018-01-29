@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -32,6 +32,10 @@
 
 #define MDP_INTR_MASK_INTF_VSYNC(intf_num) \
 	(1 << (2 * (intf_num - MDSS_MDP_INTF0) + MDSS_MDP_IRQ_INTF_VSYNC))
+
+//ASUS_BSP: Louis ++
+extern int MdpBoostUp;
+//ASUS_BSP: Louis --
 
 /* intf timing settings */
 struct intf_timing_params {
@@ -213,7 +217,7 @@ static void mdss_mdp_video_intf_recovery(void *data, int event)
 			mutex_unlock(&ctl->offlock);
 			return;
 		} else {
-			pr_warn_once("line count is less. line_cnt = %d\n",
+			pr_warn("line count is less. line_cnt = %d\n",
 								line_cnt);
 			/* Add delay so that line count is in active region */
 			udelay(delay);
@@ -656,6 +660,11 @@ static void mdss_mdp_video_underrun_intr_done(void *arg)
 
 	if (ctl->opmode & MDSS_MDP_CTL_OP_PACK_3D_ENABLE)
 		schedule_work(&ctl->recover_work);
+
+    //ASUS_BSP: Louis +++, "boostup mdp in 10 frames update"
+    MdpBoostUp = 10;
+    mdss_set_mdp_max_clk(1);
+    //ASUS_BSP: Louis ---
 }
 
 static int mdss_mdp_video_vfp_fps_update(struct mdss_mdp_video_ctx *ctx,
@@ -1197,21 +1206,15 @@ static int mdss_mdp_video_intfs_setup(struct mdss_mdp_ctl *ctl,
 
 	dst_bpp = pinfo->fbc.enabled ? (pinfo->fbc.target_bpp) : (pinfo->bpp);
 
-	itp.width = mult_frac((pinfo->xres + pinfo->lcdc.border_left +
-			pinfo->lcdc.border_right), dst_bpp, pinfo->bpp);
-	itp.height = pinfo->yres + pinfo->lcdc.border_top +
-					pinfo->lcdc.border_bottom;
+	itp.width = mult_frac((pinfo->xres + pinfo->lcdc.xres_pad),
+				dst_bpp, pinfo->bpp);
+	itp.height = pinfo->yres + pinfo->lcdc.yres_pad;
 	itp.border_clr = pinfo->lcdc.border_clr;
 	itp.underflow_clr = pinfo->lcdc.underflow_clr;
 	itp.hsync_skew = pinfo->lcdc.hsync_skew;
 
-	/* tg active area is not work, hence yres should equal to height */
-	itp.xres = mult_frac((pinfo->xres + pinfo->lcdc.border_left +
-			pinfo->lcdc.border_right), dst_bpp, pinfo->bpp);
-
-	itp.yres = pinfo->yres + pinfo->lcdc.border_top +
-				pinfo->lcdc.border_bottom;
-
+	itp.xres = mult_frac(pinfo->xres, dst_bpp, pinfo->bpp);
+	itp.yres = pinfo->yres;
 	itp.h_back_porch = pinfo->lcdc.h_back_porch;
 	itp.h_front_porch = pinfo->lcdc.h_front_porch;
 	itp.v_back_porch = pinfo->lcdc.v_back_porch;
